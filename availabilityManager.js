@@ -1,50 +1,127 @@
-const fs = require('fs');
 const chrono = require('chrono-node');
-const { safeWriteFile, dataPath } = require('./state');
+const { db, prepare } = require('./db/database');
 
-const AVAILABILITY_FILE = dataPath('availability.json');
+// In-memory cache
 const availability = new Map(); // guildId -> Map(userId -> data)
+
+// Prepared statements
+let statements = null;
+
+function getStatements() {
+    if (statements) return statements;
+
+    statements = {
+        getAll: prepare('SELECT * FROM availability'),
+        getGuild: prepare('SELECT * FROM availability WHERE guild_id = ?'),
+        getUser: prepare('SELECT * FROM availability WHERE guild_id = ? AND user_id = ?'),
+        upsert: prepare(`
+            INSERT INTO availability (guild_id, user_id, timezone, days, roles, notes, windows)
+            VALUES (@guild_id, @user_id, @timezone, @days, @roles, @notes, @windows)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                timezone = excluded.timezone,
+                days = excluded.days,
+                roles = excluded.roles,
+                notes = excluded.notes,
+                windows = excluded.windows
+        `),
+        delete: prepare('DELETE FROM availability WHERE guild_id = ? AND user_id = ?')
+    };
+
+    return statements;
+}
 
 function loadAvailability() {
     availability.clear();
-    if (!fs.existsSync(AVAILABILITY_FILE)) return;
-    try {
-        const data = JSON.parse(fs.readFileSync(AVAILABILITY_FILE, 'utf8'));
-        Object.entries(data).forEach(([guildId, entries]) => {
-            const map = new Map();
-            Object.entries(entries).forEach(([userId, value]) => map.set(userId, normalizeAvailability(value)));
-            availability.set(guildId, map);
+    const stmts = getStatements();
+    const rows = stmts.getAll.all();
+
+    rows.forEach(row => {
+        if (!availability.has(row.guild_id)) {
+            availability.set(row.guild_id, new Map());
+        }
+        availability.get(row.guild_id).set(row.user_id, {
+            timezone: row.timezone || '',
+            days: row.days || '',
+            roles: row.roles || '',
+            notes: row.notes || '',
+            windows: row.windows ? JSON.parse(row.windows) : []
         });
-    } catch (error) {
-        console.error('Failed to load availability:', error);
-    }
+    });
+
+    console.log(`Loaded availability for ${availability.size} guilds`);
 }
 
 function saveAvailability() {
-    const payload = {};
-    for (const [guildId, map] of availability.entries()) {
-        payload[guildId] = Object.fromEntries(map);
-    }
-    safeWriteFile(AVAILABILITY_FILE, JSON.stringify(payload, null, 2));
+    // No-op: changes are persisted immediately
 }
 
 function setAvailability(guildId, userId, data) {
-    if (!availability.has(guildId)) availability.set(guildId, new Map());
-    availability.get(guildId).set(userId, normalizeAvailability(data));
-    saveAvailability();
+    const stmts = getStatements();
+    const normalized = normalizeAvailability(data);
+
+    stmts.upsert.run({
+        guild_id: guildId,
+        user_id: userId,
+        timezone: normalized?.timezone || null,
+        days: normalized?.days || null,
+        roles: normalized?.roles || null,
+        notes: normalized?.notes || null,
+        windows: normalized?.windows ? JSON.stringify(normalized.windows) : null
+    });
+
+    // Update cache
+    if (!availability.has(guildId)) {
+        availability.set(guildId, new Map());
+    }
+    availability.get(guildId).set(userId, normalized);
 }
 
 function getAvailability(guildId, userId) {
-    return availability.get(guildId)?.get(userId) || null;
+    // Check cache first
+    const cached = availability.get(guildId)?.get(userId);
+    if (cached) return cached;
+
+    // Fallback to database
+    const stmts = getStatements();
+    const row = stmts.getUser.get(guildId, userId);
+
+    if (!row) return null;
+
+    return {
+        timezone: row.timezone || '',
+        days: row.days || '',
+        roles: row.roles || '',
+        notes: row.notes || '',
+        windows: row.windows ? JSON.parse(row.windows) : []
+    };
 }
 
 function usersAvailableAt(guildId, timestampSeconds) {
+    // Ensure cache is populated
+    if (!availability.has(guildId)) {
+        const stmts = getStatements();
+        const rows = stmts.getGuild.all(guildId);
+        const guildMap = new Map();
+        rows.forEach(row => {
+            guildMap.set(row.user_id, {
+                timezone: row.timezone || '',
+                days: row.days || '',
+                roles: row.roles || '',
+                notes: row.notes || '',
+                windows: row.windows ? JSON.parse(row.windows) : []
+            });
+        });
+        availability.set(guildId, guildMap);
+    }
+
     const guildMap = availability.get(guildId);
     if (!guildMap || !timestampSeconds) return [];
+
     const date = new Date(timestampSeconds * 1000);
     const day = date.getUTCDay();
     const minutes = date.getUTCHours() * 60 + date.getUTCMinutes();
     const result = [];
+
     for (const [userId, entry] of guildMap.entries()) {
         const windows = entry?.windows || [];
         const match = windows.some((w) => w.day === day && minutes >= w.start && minutes <= w.end);

@@ -8,6 +8,9 @@ config.json
 
 # Data files (contain user/guild-specific data)
 data/
+*.db
+*.db-wal
+*.db-shm
 
 # Logs
 logs/

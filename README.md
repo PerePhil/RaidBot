@@ -87,7 +87,12 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 │   ├── errorMessages.js   # User-friendly errors
 │   ├── dmRetry.js         # DM retry logic
 │   └── ...
-├── data/                  # Persistent JSON data (gitignored)
+├── data/                  # Persistent data (gitignored)
+│   └── wizbot.db          # SQLite database
+├── db/                    # Database layer
+│   ├── database.js        # Connection wrapper
+│   ├── schema.sql         # Schema definition
+│   └── migrate.js         # JSON → SQLite migration
 ├── state.js               # State management and persistence
 ├── presence.js            # Bot presence/status updates
 ├── reminderScheduler.js   # Reminder and auto-close scheduler
@@ -104,10 +109,22 @@ npm test
 
 Uses Node.js built-in test runner. Tests cover time parsing, state persistence, waitlist promotion, and more.
 
+## Database
+
+WizBot uses SQLite for data persistence. The database file is stored at `data/wizbot.db`.
+
+**Migrating from JSON (if upgrading):**
+```bash
+node db/migrate.js
+```
+
+This imports existing JSON data and backs up the original files.
+
 ## Dependencies
 
 - [discord.js](https://discord.js.org/) — Discord API library
 - [chrono-node](https://github.com/wanasit/chrono) — Natural language date parsing
+- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) — Fast, synchronous SQLite
 
 ## License
 

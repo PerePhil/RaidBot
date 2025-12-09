@@ -1,40 +1,70 @@
-const fs = require('fs');
-const { safeWriteFile, dataPath } = require('./state');
+const { db, prepare } = require('./db/database');
 
-const AUDIT_FILE = dataPath('audit_channels.json');
+// In-memory cache
 const auditChannels = new Map();
 
+// Batching state
 const pendingEmbeds = new Map(); // guildId -> [payloads]
 const flushTimers = new Map(); // guildId -> timeout
 const guildRefs = new Map(); // guildId -> guild ref
 const BATCH_WINDOW_MS = 2 * 60 * 1000;
 const EMBEDS_PER_MESSAGE = 10;
 
+// Prepared statements
+let statements = null;
+
+function getStatements() {
+    if (statements) return statements;
+
+    statements = {
+        getAuditChannel: prepare('SELECT audit_channel_id FROM guilds WHERE id = ?'),
+        updateAuditChannel: prepare('UPDATE guilds SET audit_channel_id = ? WHERE id = ?'),
+        ensureGuild: prepare('INSERT OR IGNORE INTO guilds (id) VALUES (?)')
+    };
+
+    return statements;
+}
+
 function loadAuditChannels() {
-    if (!fs.existsSync(AUDIT_FILE)) return;
-    try {
-        const data = JSON.parse(fs.readFileSync(AUDIT_FILE, 'utf8'));
-        Object.entries(data).forEach(([guildId, channelId]) => auditChannels.set(guildId, channelId));
-    } catch (error) {
-        console.error('Failed to load audit channels:', error);
-    }
+    auditChannels.clear();
+    const rows = prepare('SELECT id, audit_channel_id FROM guilds WHERE audit_channel_id IS NOT NULL').all();
+    rows.forEach(row => auditChannels.set(row.id, row.audit_channel_id));
+    console.log(`Loaded ${auditChannels.size} audit channel configurations`);
 }
 
 function saveAuditChannels() {
-    safeWriteFile(AUDIT_FILE, JSON.stringify(Object.fromEntries(auditChannels), null, 2));
+    // No-op: changes are persisted immediately
 }
 
 function setAuditChannel(guildId, channelId) {
+    const stmts = getStatements();
+    stmts.ensureGuild.run(guildId);
+    stmts.updateAuditChannel.run(channelId || null, guildId);
+
     if (!channelId) {
         auditChannels.delete(guildId);
     } else {
         auditChannels.set(guildId, channelId);
     }
-    saveAuditChannels();
 }
 
 function getAuditChannel(guildId) {
-    return auditChannels.get(guildId) || null;
+    // Check cache first
+    if (auditChannels.has(guildId)) {
+        return auditChannels.get(guildId);
+    }
+
+    // Fallback to database
+    const stmts = getStatements();
+    const row = stmts.getAuditChannel.get(guildId);
+    const channelId = row?.audit_channel_id || null;
+
+    // Cache the result
+    if (channelId) {
+        auditChannels.set(guildId, channelId);
+    }
+
+    return channelId;
 }
 
 function enqueueAudit(guild, payload) {

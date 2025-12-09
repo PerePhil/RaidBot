@@ -1,5 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+
+// Initialize database schema before importing modules that use it
+const { initializeSchema } = require('../db/database');
+initializeSchema();
+
 const availability = require('../availabilityManager');
 
 test('parses weekday windows and matches usersAvailableAt', () => {

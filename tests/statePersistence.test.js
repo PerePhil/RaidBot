@@ -1,7 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
 const {
     activeRaids,
@@ -10,46 +8,41 @@ const {
     deleteActiveRaid
 } = require('../state');
 
-const ACTIVE_FILE = path.resolve('.test_active_raids.json');
-const BACKUP_FILE = `${ACTIVE_FILE}.bak`;
+// Now using in-memory SQLite for tests, so we just test the API behavior
 
 test.beforeEach(() => {
     activeRaids.clear();
-    if (fs.existsSync(ACTIVE_FILE)) {
-        fs.unlinkSync(ACTIVE_FILE);
-    }
-    if (fs.existsSync(BACKUP_FILE)) {
-        fs.unlinkSync(BACKUP_FILE);
-    }
 });
 
-test.after(() => {
-    if (fs.existsSync(ACTIVE_FILE)) {
-        fs.unlinkSync(ACTIVE_FILE);
-    }
-    if (fs.existsSync(BACKUP_FILE)) {
-        fs.unlinkSync(BACKUP_FILE);
-    }
-});
-
-test('setActiveRaid persists to disk and creates backup on subsequent writes', () => {
-    const firstRaid = { raidId: 'A1', guildId: '1' };
+test('setActiveRaid stores raid in memory and database', () => {
+    const firstRaid = {
+        raidId: 'A1',
+        guildId: '1',
+        channelId: 'channel1',
+        creatorId: 'creator1',
+        type: 'raid',
+        signups: []
+    };
     setActiveRaid('message-1', firstRaid);
 
-    assert.ok(fs.existsSync(ACTIVE_FILE), 'active_raids file not written');
-    const raw = JSON.parse(fs.readFileSync(ACTIVE_FILE, 'utf8'));
-    assert.ok(raw['message-1']);
+    // Check it's in the in-memory map
+    assert.ok(activeRaids.has('message-1'), 'raid not in memory');
+    const stored = activeRaids.get('message-1');
+    assert.equal(stored.raidId, 'A1');
 
-    const secondRaid = { raidId: 'B2', guildId: '1' };
-    setActiveRaid('message-2', secondRaid);
-    assert.ok(fs.existsSync(BACKUP_FILE), 'backup file not created');
-
+    // Cleanup
     deleteActiveRaid('message-1');
-    deleteActiveRaid('message-2');
 });
 
 test('loadActiveRaidState restores previous entries', () => {
-    const storedRaid = { raidId: 'RESTORE', guildId: '2' };
+    const storedRaid = {
+        raidId: 'RESTORE',
+        guildId: '2',
+        channelId: 'channel2',
+        creatorId: 'creator2',
+        type: 'raid',
+        signups: []
+    };
     setActiveRaid('message-restore', storedRaid);
     activeRaids.clear();
 
@@ -58,4 +51,25 @@ test('loadActiveRaidState restores previous entries', () => {
     assert.ok(entry);
     assert.equal(entry.raidId, 'RESTORE');
     deleteActiveRaid('message-restore');
+});
+
+test('deleteActiveRaid removes raid from memory and database', () => {
+    const raid = {
+        raidId: 'DEL1',
+        guildId: '3',
+        channelId: 'channel3',
+        creatorId: 'creator3',
+        type: 'raid',
+        signups: []
+    };
+    setActiveRaid('message-delete', raid);
+    assert.ok(activeRaids.has('message-delete'));
+
+    deleteActiveRaid('message-delete');
+    assert.ok(!activeRaids.has('message-delete'), 'raid still in memory after delete');
+
+    // Verify it's not reloaded from DB
+    activeRaids.clear();
+    loadActiveRaidState();
+    assert.ok(!activeRaids.has('message-delete'), 'raid still in database after delete');
 });

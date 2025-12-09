@@ -23,6 +23,7 @@ const { loadAuditChannels } = require('./auditLog');
 const { loadAvailability } = require('./availabilityManager');
 const { loadAnalytics } = require('./utils/analytics');
 const { logger } = require('./utils/logger');
+const { close: closeDatabase } = require('./db/database');
 
 const CLIENT_ID = config.clientId;
 const TOKEN = config.token;
@@ -169,6 +170,10 @@ async function gracefulShutdown(signal) {
         // Destroy the Discord client
         logger.info('Destroying Discord client...');
         await client.destroy();
+
+        // Close database connection
+        logger.info('Closing database connection...');
+        closeDatabase();
 
         logger.info('Graceful shutdown complete');
         process.exit(0);

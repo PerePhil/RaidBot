@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "ACTIVE_RAIDS_FILE=.test_active_raids.json node --test"
+    "test": "ACTIVE_RAIDS_FILE=.test_active_raids.json node --test --test-force-exit"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "better-sqlite3": "^12.5.0",
     "chrono-node": "^2.9.0",
     "discord.js": "^14.24.2",
     "dotenv": "^17.2.3"

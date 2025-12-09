@@ -30,6 +30,9 @@ test('processWaitlistOpenings promotes raid waitlist users', async () => {
         template: { name: 'Waitlist Test' },
         type: 'raid',
         raidId: 'WAIT01',
+        guildId: 'test-guild',
+        channelId: 'test-channel',
+        creatorId: 'test-creator',
         signups: [
             {
                 emoji: '1️⃣',
@@ -54,6 +57,9 @@ test('processWaitlistOpenings promotes museum waitlist users', async () => {
     const raidData = {
         type: 'museum',
         raidId: 'MUSEUM1',
+        guildId: 'test-guild',
+        channelId: 'test-channel',
+        creatorId: 'test-creator',
         signups: ['user-a'],
         waitlist: ['user-b'],
         maxSlots: 2,

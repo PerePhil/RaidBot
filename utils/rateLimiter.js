@@ -98,11 +98,15 @@ class RateLimiter {
 const reactionLimiter = new RateLimiter({ maxRequests: 5, windowMs: 10000 }); // 5 reactions per 10s per user
 const commandCooldowns = new RateLimiter({ maxRequests: 3, windowMs: 30000 }); // 3 commands per 30s per user
 
-// Cleanup old entries every 5 minutes
-setInterval(() => {
-    reactionLimiter.cleanup();
-    commandCooldowns.cleanup();
-}, 5 * 60 * 1000);
+// Cleanup old entries every 5 minutes (skip in test mode)
+const isTestMode = process.env.NODE_ENV === 'test' ||
+    process.argv.some(arg => arg.includes('node:test') || arg.includes('--test'));
+if (!isTestMode) {
+    setInterval(() => {
+        reactionLimiter.cleanup();
+        commandCooldowns.cleanup();
+    }, 5 * 60 * 1000);
+}
 
 module.exports = {
     RateLimiter,

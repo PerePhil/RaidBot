@@ -1,90 +1,182 @@
-const fs = require('fs');
-const path = require('path');
 const baseTemplates = require('./templates');
-const { safeWriteFile, dataPath } = require('./state');
+const { db, prepare } = require('./db/database');
 
-const TEMPLATE_OVERRIDES_FILE = dataPath('template_overrides.json');
-let overrides = { overrides: {}, custom: {} };
+// Prepared statements
+let statements = null;
 
-function normalizeStore(raw) {
-    if (raw.overrides || raw.custom) {
-        return {
-            overrides: raw.overrides || {},
-            custom: raw.custom || {}
-        };
-    }
-    // legacy shape was a flat object of overrides
-    return { overrides: raw || {}, custom: {} };
+function getStatements() {
+    if (statements) return statements;
+
+    statements = {
+        getOverrides: prepare('SELECT * FROM template_overrides WHERE guild_id = ?'),
+        getOverride: prepare('SELECT * FROM template_overrides WHERE guild_id = ? AND template_id = ?'),
+        upsertOverride: prepare(`
+            INSERT INTO template_overrides (guild_id, template_id, name, emoji, description, color, disabled)
+            VALUES (@guild_id, @template_id, @name, @emoji, @description, @color, @disabled)
+            ON CONFLICT(guild_id, template_id) DO UPDATE SET
+                name = excluded.name,
+                emoji = excluded.emoji,
+                description = excluded.description,
+                color = excluded.color,
+                disabled = excluded.disabled
+        `),
+        deleteOverride: prepare('DELETE FROM template_overrides WHERE guild_id = ? AND template_id = ?'),
+
+        getCustomTemplates: prepare('SELECT * FROM custom_templates WHERE guild_id = ?'),
+        getCustomTemplate: prepare('SELECT * FROM custom_templates WHERE id = ?'),
+        insertCustomTemplate: prepare(`
+            INSERT INTO custom_templates (id, guild_id, name, emoji, description, color, role_groups)
+            VALUES (@id, @guild_id, @name, @emoji, @description, @color, @role_groups)
+        `),
+        updateCustomTemplate: prepare(`
+            UPDATE custom_templates SET
+                name = @name,
+                emoji = @emoji,
+                description = @description,
+                color = @color,
+                role_groups = @role_groups
+            WHERE id = @id
+        `),
+        deleteCustomTemplate: prepare('DELETE FROM custom_templates WHERE id = ?')
+    };
+
+    return statements;
 }
 
 function loadTemplateOverrides() {
-    if (!fs.existsSync(TEMPLATE_OVERRIDES_FILE)) {
-        overrides = { overrides: {}, custom: {} };
-        return;
-    }
-    try {
-        const raw = JSON.parse(fs.readFileSync(TEMPLATE_OVERRIDES_FILE, 'utf8'));
-        overrides = normalizeStore(raw);
-    } catch (error) {
-        console.error('Failed to load template overrides:', error);
-        overrides = { overrides: {}, custom: {} };
-    }
+    // No-op: data is loaded on demand from SQLite
+    console.log('Template overrides ready (SQLite)');
 }
 
 function saveTemplateOverrides() {
-    try {
-        safeWriteFile(TEMPLATE_OVERRIDES_FILE, JSON.stringify(overrides, null, 2));
-    } catch (error) {
-        console.error('Failed to save template overrides:', error);
-    }
+    // No-op: changes are persisted immediately
 }
 
 function getGuildTemplateOverrides(guildId) {
-    return overrides.overrides[guildId] || {};
+    const stmts = getStatements();
+    const rows = stmts.getOverrides.all(guildId);
+    const result = {};
+    rows.forEach(row => {
+        result[row.template_id] = {
+            name: row.name,
+            emoji: row.emoji,
+            description: row.description,
+            color: row.color,
+            disabled: row.disabled === 1
+        };
+    });
+    return result;
 }
 
 function getGuildCustomTemplates(guildId) {
-    return overrides.custom[guildId] || {};
+    const stmts = getStatements();
+    const rows = stmts.getCustomTemplates.all(guildId);
+    const result = {};
+    rows.forEach(row => {
+        result[row.id] = {
+            id: row.id,
+            name: row.name,
+            emoji: row.emoji,
+            description: row.description,
+            color: row.color,
+            roleGroups: row.role_groups ? JSON.parse(row.role_groups) : [],
+            isCustom: true
+        };
+    });
+    return result;
 }
 
 function updateGuildTemplateOverrides(guildId, templateId, overrideData, options = {}) {
-    if (!overrides.overrides[guildId]) overrides.overrides[guildId] = {};
+    const stmts = getStatements();
+
     if (options.reset) {
-        delete overrides.overrides[guildId][templateId];
-    } else {
-        overrides.overrides[guildId][templateId] = { ...(overrides.overrides[guildId][templateId] || {}), ...(overrideData || {}) };
+        stmts.deleteOverride.run(guildId, templateId);
+        return;
     }
-    saveTemplateOverrides();
+
+    // Get existing override to merge
+    const existing = stmts.getOverride.get(guildId, templateId) || {};
+
+    stmts.upsertOverride.run({
+        guild_id: guildId,
+        template_id: templateId,
+        name: overrideData?.name || existing.name || null,
+        emoji: overrideData?.emoji || existing.emoji || null,
+        description: overrideData?.description || existing.description || null,
+        color: overrideData?.color || existing.color || null,
+        disabled: (overrideData?.disabled ?? existing.disabled) ? 1 : 0
+    });
 }
 
 function addCustomTemplate(guildId, templateData) {
-    if (!overrides.custom[guildId]) overrides.custom[guildId] = {};
+    const stmts = getStatements();
     const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    overrides.custom[guildId][id] = {
+
+    const template = {
+        id,
+        guild_id: guildId,
         name: templateData.name || 'Custom Raid',
         emoji: templateData.emoji || '',
         description: templateData.description || '',
         color: templateData.color || '',
-        roleGroups: templateData.roleGroups || [],
+        role_groups: JSON.stringify(templateData.roleGroups || [])
+    };
+
+    stmts.insertCustomTemplate.run(template);
+
+    return {
         id,
+        name: template.name,
+        emoji: template.emoji,
+        description: template.description,
+        color: template.color,
+        roleGroups: templateData.roleGroups || [],
         isCustom: true
     };
-    saveTemplateOverrides();
-    return overrides.custom[guildId][id];
 }
 
 function updateCustomTemplate(guildId, templateId, updates) {
-    if (!overrides.custom[guildId] || !overrides.custom[guildId][templateId]) return null;
-    overrides.custom[guildId][templateId] = { ...overrides.custom[guildId][templateId], ...updates };
-    saveTemplateOverrides();
-    return overrides.custom[guildId][templateId];
+    const stmts = getStatements();
+    const existing = stmts.getCustomTemplate.get(templateId);
+
+    if (!existing || existing.guild_id !== guildId) {
+        return null;
+    }
+
+    const updated = {
+        id: templateId,
+        name: updates.name ?? existing.name,
+        emoji: updates.emoji ?? existing.emoji,
+        description: updates.description ?? existing.description,
+        color: updates.color ?? existing.color,
+        role_groups: updates.roleGroups
+            ? JSON.stringify(updates.roleGroups)
+            : existing.role_groups
+    };
+
+    stmts.updateCustomTemplate.run(updated);
+
+    return {
+        id: templateId,
+        name: updated.name,
+        emoji: updated.emoji,
+        description: updated.description,
+        color: updated.color,
+        roleGroups: JSON.parse(updated.role_groups || '[]'),
+        isCustom: true
+    };
 }
 
 function deleteCustomTemplate(guildId, templateId) {
-    if (!overrides.custom[guildId]) return false;
-    const removed = delete overrides.custom[guildId][templateId];
-    if (removed) saveTemplateOverrides();
-    return removed;
+    const stmts = getStatements();
+    const existing = stmts.getCustomTemplate.get(templateId);
+
+    if (!existing || existing.guild_id !== guildId) {
+        return false;
+    }
+
+    stmts.deleteCustomTemplate.run(templateId);
+    return true;
 }
 
 function deriveSlug(name) {

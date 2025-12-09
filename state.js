@@ -429,23 +429,51 @@ function reconstructRaidData(raid, signups) {
         raidData.length = raid.length;
         raidData.strategy = raid.strategy;
 
-        // Reconstruct role-based signups
-        const roleMap = new Map();
+        // First, build ALL roles from the template (to preserve empty roles)
+        const allRoles = [];
+        if (raidData.template && raidData.template.roleGroups) {
+            for (const group of raidData.template.roleGroups) {
+                for (const role of group.roles || []) {
+                    allRoles.push({
+                        emoji: role.emoji || group.emoji,
+                        icon: role.icon,
+                        name: role.name,
+                        slots: role.slots || 1,
+                        users: [],
+                        groupName: group.name,
+                        sideAssignments: {},
+                        waitlist: []
+                    });
+                }
+            }
+        }
+
+        // Build a lookup map for populating signups
+        const roleByName = new Map();
+        for (const role of allRoles) {
+            roleByName.set(role.name, role);
+        }
+
+        // Populate signups from database
         for (const signup of signups) {
-            const key = signup.role_name;
-            if (!roleMap.has(key)) {
-                roleMap.set(key, {
+            let role = roleByName.get(signup.role_name);
+
+            // If role not in template (legacy data), create it
+            if (!role) {
+                role = {
                     emoji: signup.role_emoji,
                     icon: signup.role_icon,
                     name: signup.role_name,
-                    slots: signup.slots,
+                    slots: signup.slots || 1,
                     users: [],
                     groupName: signup.group_name,
                     sideAssignments: {},
                     waitlist: []
-                });
+                };
+                allRoles.push(role);
+                roleByName.set(signup.role_name, role);
             }
-            const role = roleMap.get(key);
+
             if (signup.is_waitlist) {
                 role.waitlist.push(signup.user_id);
             } else {
@@ -455,7 +483,8 @@ function reconstructRaidData(raid, signups) {
                 }
             }
         }
-        raidData.signups = Array.from(roleMap.values());
+
+        raidData.signups = allRoles;
     }
 
     return raidData;

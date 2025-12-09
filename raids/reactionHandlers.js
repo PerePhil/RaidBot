@@ -66,6 +66,12 @@ async function handleReactionAdd(reaction, user) {
     }
 
     if (alreadySignedUp) {
+        // Remove the reaction since they can't sign up for another role
+        try {
+            await reaction.users.remove(user.id);
+        } catch (error) {
+            // Ignore - reaction may already be removed
+        }
         await safeDm(user, `You're already signed up for a role in this raid! Please remove your current signup before choosing a different role.`);
         return;
     }

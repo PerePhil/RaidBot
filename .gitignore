@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+config.json
+.env
+.env.*
+
+# Data files (contain user/guild-specific data)
+data/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test files
+.test_active_raids.json
+.test_active_raids.json.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Optional: uncomment if you want to ignore lock file
+# package-lock.json

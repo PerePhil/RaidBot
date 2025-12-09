@@ -1,0 +1,6 @@
+{
+    "note": "Use .env file for configuration. See README for details.",
+    "clientId": "Set DISCORD_CLIENT_ID in .env",
+    "token": "Set DISCORD_TOKEN in .env",
+    "allowedGuildIds": "Set DISCORD_ALLOWED_GUILDS in .env (comma-separated)"
+}

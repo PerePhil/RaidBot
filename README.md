@@ -1,0 +1,114 @@
+# WizBot
+
+A Discord bot for managing raid signups in Wizard101. Supports multiple raid types with reaction-based signups, role management, reminders, and per-guild customization.
+
+## Features
+
+- **Raid Management** — Create and manage raids for Dragonspyre (Voracious Void), Lemuria (Ghastly Conspiracy), and Polaris (Cabal's Revenge)
+- **Museum Signups** — Separate signup system for museum runs
+- **Reaction-Based Signups** — Users react with role emojis to sign up; automatic waitlist management with DM notifications
+- **Smart Reminders** — Configurable creator and participant reminders with auto-close for full raids
+- **Natural Language Time Parsing** — "tomorrow 7pm", "next Friday 6:30", or Unix timestamps
+- **Role-Based Permissions** — Per-guild admin roles and command-specific permissions
+- **Participation Stats** — Track user participation, favorite roles, and server-wide activity
+- **Availability Tracking** — Users can record their availability preferences
+- **Customizable Templates** — Enable/disable or rename raid templates per guild
+- **Rate Limiting** — Prevents spam with configurable cooldowns on reactions and commands
+- **Graceful Shutdown** — Safe shutdown with state preservation
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/create` | Interactive raid/museum creation flow |
+| `/raid` | Management panel (Close, Reopen, Delete, Change Time) |
+| `/raidsignup` | Admin signup edits (assign, remove, side assignment) |
+| `/raidinfo` | List, view details, or export raids as .ics |
+| `/setchannel` | Configure raid/museum/audit channels |
+| `/settings` | Reminder and auto-close configuration |
+| `/templates` | Enable/disable or rename raid templates |
+| `/raidstats` | View participation statistics |
+| `/availability` | Record/view user availability |
+| `/permissions` | Configure role-based permissions |
+| `/changelog` | View current release notes |
+| `/help` | Command documentation |
+| `/ping` | Bot health check and status |
+
+## Setup
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Create `config.json` with your bot credentials:
+   ```json
+   {
+     "clientId": "YOUR_CLIENT_ID",
+     "token": "YOUR_BOT_TOKEN",
+     "allowedGuildIds": ["GUILD_ID_1", "GUILD_ID_2"]
+   }
+   ```
+   - `allowedGuildIds` is optional; leave empty to allow all guilds
+
+   **Or use environment variables:**
+   ```bash
+   export DISCORD_CLIENT_ID="YOUR_CLIENT_ID"
+   export DISCORD_TOKEN="YOUR_BOT_TOKEN"
+   export DISCORD_ALLOWED_GUILDS="GUILD_ID_1,GUILD_ID_2"
+   ```
+
+4. Run the bot:
+   ```bash
+   node bot.js
+   ```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DISCORD_CLIENT_ID` | Bot client ID | — |
+| `DISCORD_TOKEN` | Bot token | — |
+| `DISCORD_ALLOWED_GUILDS` | Comma-separated guild IDs | All guilds |
+| `LOG_LEVEL` | Logging verbosity: DEBUG, INFO, WARN, ERROR | INFO |
+| `LOG_TO_FILE` | Enable file logging | false |
+
+## Project Structure
+
+```
+├── bot.js                 # Main entry point
+├── commands/              # Slash command implementations
+├── raids/                 # Raid logic and reaction handlers
+├── utils/                 # Utility functions
+│   ├── config.js          # Configuration loader
+│   ├── logger.js          # Structured logging
+│   ├── validators.js      # Input validation
+│   ├── rateLimiter.js     # Rate limiting
+│   ├── errorMessages.js   # User-friendly errors
+│   ├── dmRetry.js         # DM retry logic
+│   └── ...
+├── data/                  # Persistent JSON data (gitignored)
+├── state.js               # State management and persistence
+├── presence.js            # Bot presence/status updates
+├── reminderScheduler.js   # Reminder and auto-close scheduler
+├── auditLog.js            # Audit logging functionality
+├── availabilityManager.js # User availability tracking
+└── templatesManager.js    # Raid template customization
+```
+
+## Testing
+
+```bash
+npm test
+```
+
+Uses Node.js built-in test runner. Tests cover time parsing, state persistence, waitlist promotion, and more.
+
+## Dependencies
+
+- [discord.js](https://discord.js.org/) — Discord API library
+- [chrono-node](https://github.com/wanasit/chrono) — Natural language date parsing
+
+## License
+
+ISC

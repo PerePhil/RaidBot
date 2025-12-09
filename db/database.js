@@ -40,7 +40,44 @@ db.pragma('foreign_keys = ON');
 function initializeSchema() {
     const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
     db.exec(schema);
+
+    // Run migrations for existing databases
+    runMigrations();
+
     console.log('Database schema initialized');
+}
+
+/**
+ * Run migrations to add new columns to existing tables
+ * SQLite doesn't support IF NOT EXISTS for columns, so we check first
+ */
+function runMigrations() {
+    const migrations = [
+        // Threads support (added Dec 2024)
+        { table: 'guilds', column: 'threads_enabled', sql: 'ALTER TABLE guilds ADD COLUMN threads_enabled INTEGER DEFAULT 0' },
+        { table: 'guilds', column: 'thread_auto_archive_minutes', sql: 'ALTER TABLE guilds ADD COLUMN thread_auto_archive_minutes INTEGER DEFAULT 1440' },
+        { table: 'raids', column: 'thread_id', sql: 'ALTER TABLE raids ADD COLUMN thread_id TEXT' },
+        { table: 'raids', column: 'recurring_id', sql: 'ALTER TABLE raids ADD COLUMN recurring_id TEXT' },
+    ];
+
+    for (const migration of migrations) {
+        if (!columnExists(migration.table, migration.column)) {
+            try {
+                db.exec(migration.sql);
+                console.log(`Migration: Added ${migration.column} to ${migration.table}`);
+            } catch (error) {
+                console.error(`Migration failed for ${migration.column}:`, error.message);
+            }
+        }
+    }
+}
+
+/**
+ * Check if a column exists in a table
+ */
+function columnExists(table, column) {
+    const result = db.prepare(`PRAGMA table_info(${table})`).all();
+    return result.some(row => row.name === column);
 }
 
 /**

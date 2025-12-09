@@ -311,6 +311,19 @@ async function closeRaidSignup(message, raidData, options = {}) {
         raidData.statsRecorded = true;
     }
 
+    // Archive discussion thread if exists
+    if (raidData.threadId && message.guild) {
+        try {
+            const thread = await message.guild.channels.fetch(raidData.threadId);
+            if (thread?.isThread() && !thread.archived) {
+                await thread.setArchived(true);
+            }
+        } catch (error) {
+            // Thread may already be archived or deleted
+            console.error('Failed to archive raid thread:', error.message);
+        }
+    }
+
     return true;
 }
 

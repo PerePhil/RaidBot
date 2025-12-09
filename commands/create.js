@@ -10,7 +10,7 @@ const {
     EmbedBuilder,
     MessageFlags
 } = require('discord.js');
-const { setActiveRaid } = require('../state');
+const { setActiveRaid, getGuildSettings } = require('../state');
 const {
     parseDateTimeToTimestamp,
     getRaidSignupChannel,
@@ -118,7 +118,7 @@ module.exports = {
                 await interaction.editReply({
                     embeds: [buildSummaryEmbed(state)],
                     components: buildComponents(state)
-                }).catch(() => {});
+                }).catch(() => { });
                 return;
             }
 
@@ -131,7 +131,7 @@ module.exports = {
                     await interaction.editReply({
                         embeds: [buildSummaryEmbed(state)],
                         components: buildComponents(state)
-                    }).catch(() => {});
+                    }).catch(() => { });
                 }
                 return;
             }
@@ -142,7 +142,7 @@ module.exports = {
         collector.on('end', async (_collected, reason) => {
             if (reason === 'created') return;
             const disabled = disableComponents(buildComponents(state));
-            await interaction.editReply({ components: disabled }).catch(() => {});
+            await interaction.editReply({ components: disabled }).catch(() => { });
         });
     }
 };
@@ -315,6 +315,22 @@ async function createMuseum(interaction, state, timestamp) {
     const museumMessage = await signupChannel.send({ embeds: [embed] });
     await museumMessage.react('✅');
 
+    // Create discussion thread if enabled
+    let threadId = null;
+    const settings = getGuildSettings(interaction.guild.id);
+    if (settings.threadsEnabled) {
+        try {
+            const thread = await museumMessage.startThread({
+                name: `Museum - ${raidId}`,
+                autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
+            });
+            threadId = thread.id;
+            await thread.send(`💬 Discussion thread for **Museum Signup** (ID: \`${raidId}\`)\n⏰ Time: <t:${timestamp}:F>`);
+        } catch (error) {
+            console.error('Failed to create museum thread:', error);
+        }
+    }
+
     const raidData = {
         raidId,
         type: 'museum',
@@ -326,6 +342,7 @@ async function createMuseum(interaction, state, timestamp) {
         maxSlots: 12,
         waitlist: [],
         channelId: signupChannel.id,
+        threadId,
         creatorReminderSent: false,
         participantReminderSent: false
     };
@@ -334,8 +351,12 @@ async function createMuseum(interaction, state, timestamp) {
     await updateMuseumEmbed(museumMessage, raidData);
     await updateBotPresence();
 
+    const replyContent = threadId
+        ? `Museum signup created in ${signupChannel}! Discussion: <#${threadId}>`
+        : `Museum signup created in ${signupChannel}!`;
+
     await interaction.editReply({
-        content: `Museum signup created in ${signupChannel}!`,
+        content: replyContent,
         embeds: [],
         components: []
     });
@@ -413,6 +434,22 @@ async function createRaid(interaction, state, timestamp) {
         }
     }
 
+    // Create discussion thread if enabled
+    let threadId = null;
+    const settings = getGuildSettings(interaction.guild.id);
+    if (settings.threadsEnabled) {
+        try {
+            const thread = await raidMessage.startThread({
+                name: `${template.name} - ${raidId}`,
+                autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
+            });
+            threadId = thread.id;
+            await thread.send(`💬 Discussion thread for **${template.name}** (ID: \`${raidId}\`)\n⏰ Raid time: <t:${timestamp}:F>`);
+        } catch (error) {
+            console.error('Failed to create raid thread:', error);
+        }
+    }
+
     setActiveRaid(raidMessage.id, {
         raidId,
         template,
@@ -424,13 +461,18 @@ async function createRaid(interaction, state, timestamp) {
         creatorId: interaction.user.id,
         guildId: interaction.guild.id,
         channelId: signupChannel.id,
+        threadId,
         creatorReminderSent: false,
         participantReminderSent: false
     });
     await updateBotPresence();
 
+    const replyContent = threadId
+        ? `Raid signup created in ${signupChannel}! Discussion: <#${threadId}>`
+        : `Raid signup created in ${signupChannel}!`;
+
     await interaction.editReply({
-        content: `Raid signup created in ${signupChannel}!`,
+        content: replyContent,
         embeds: [],
         components: []
     });

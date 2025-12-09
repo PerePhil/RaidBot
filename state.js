@@ -31,11 +31,11 @@ function getStatements() {
             INSERT INTO guilds (id, raid_channel_id, museum_channel_id, audit_channel_id,
                 creator_reminder_seconds, participant_reminder_seconds, auto_close_seconds,
                 last_auto_close_seconds, creator_reminders_enabled, participant_reminders_enabled,
-                raid_leader_role_id)
+                raid_leader_role_id, threads_enabled, thread_auto_archive_minutes)
             VALUES (@id, @raid_channel_id, @museum_channel_id, @audit_channel_id,
                 @creator_reminder_seconds, @participant_reminder_seconds, @auto_close_seconds,
                 @last_auto_close_seconds, @creator_reminders_enabled, @participant_reminders_enabled,
-                @raid_leader_role_id)
+                @raid_leader_role_id, @threads_enabled, @thread_auto_archive_minutes)
             ON CONFLICT(id) DO UPDATE SET
                 raid_channel_id = excluded.raid_channel_id,
                 museum_channel_id = excluded.museum_channel_id,
@@ -46,7 +46,9 @@ function getStatements() {
                 last_auto_close_seconds = excluded.last_auto_close_seconds,
                 creator_reminders_enabled = excluded.creator_reminders_enabled,
                 participant_reminders_enabled = excluded.participant_reminders_enabled,
-                raid_leader_role_id = excluded.raid_leader_role_id
+                raid_leader_role_id = excluded.raid_leader_role_id,
+                threads_enabled = excluded.threads_enabled,
+                thread_auto_archive_minutes = excluded.thread_auto_archive_minutes
         `),
         updateGuildChannel: prepare('UPDATE guilds SET raid_channel_id = ? WHERE id = ?'),
         updateMuseumChannel: prepare('UPDATE guilds SET museum_channel_id = ? WHERE id = ?'),
@@ -57,10 +59,10 @@ function getStatements() {
         insertRaid: prepare(`
             INSERT INTO raids (message_id, raid_id, guild_id, channel_id, type,
                 template_slug, template_data, datetime, timestamp, length, strategy,
-                creator_id, max_slots, recurring_id, creator_reminder_sent, participant_reminder_sent)
+                creator_id, max_slots, recurring_id, thread_id, creator_reminder_sent, participant_reminder_sent)
             VALUES (@message_id, @raid_id, @guild_id, @channel_id, @type,
                 @template_slug, @template_data, @datetime, @timestamp, @length, @strategy,
-                @creator_id, @max_slots, @recurring_id, @creator_reminder_sent, @participant_reminder_sent)
+                @creator_id, @max_slots, @recurring_id, @thread_id, @creator_reminder_sent, @participant_reminder_sent)
         `),
         updateRaid: prepare(`
             UPDATE raids SET
@@ -329,7 +331,9 @@ function loadGuildSettings() {
             lastAutoCloseSeconds: row.last_auto_close_seconds,
             creatorRemindersEnabled: row.creator_reminders_enabled === 1,
             participantRemindersEnabled: row.participant_reminders_enabled === 1,
-            raidLeaderRoleId: row.raid_leader_role_id
+            raidLeaderRoleId: row.raid_leader_role_id,
+            threadsEnabled: row.threads_enabled === 1,
+            threadAutoArchiveMinutes: row.thread_auto_archive_minutes || 1440
         });
     });
     console.log(`Loaded settings for ${guildSettings.size} guilds`);
@@ -347,7 +351,9 @@ function getGuildSettings(guildId) {
         lastAutoCloseSeconds: 60 * 60,
         creatorRemindersEnabled: true,
         participantRemindersEnabled: true,
-        raidLeaderRoleId: null
+        raidLeaderRoleId: null,
+        threadsEnabled: false,
+        threadAutoArchiveMinutes: 1440
     };
     const overrides = guildSettings.get(guildId) || {};
     return { ...defaults, ...overrides };
@@ -371,7 +377,9 @@ function updateGuildSettings(guildId, updates) {
         last_auto_close_seconds: newSettings.lastAutoCloseSeconds,
         creator_reminders_enabled: newSettings.creatorRemindersEnabled ? 1 : 0,
         participant_reminders_enabled: newSettings.participantRemindersEnabled ? 1 : 0,
-        raid_leader_role_id: newSettings.raidLeaderRoleId
+        raid_leader_role_id: newSettings.raidLeaderRoleId,
+        threads_enabled: newSettings.threadsEnabled ? 1 : 0,
+        thread_auto_archive_minutes: newSettings.threadAutoArchiveMinutes || 1440
     });
 
     guildSettings.set(guildId, newSettings);
@@ -404,6 +412,7 @@ function reconstructRaidData(raid, signups) {
         guildId: raid.guild_id,
         channelId: raid.channel_id,
         recurringId: raid.recurring_id || null,
+        threadId: raid.thread_id || null,
         creatorReminderSent: raid.creator_reminder_sent === 1,
         participantReminderSent: raid.participant_reminder_sent === 1
     };
@@ -484,6 +493,7 @@ function setActiveRaid(messageId, raidData, options = {}) {
             creator_id: raidData.creatorId,
             max_slots: raidData.maxSlots || null,
             recurring_id: raidData.recurringId || null,
+            thread_id: raidData.threadId || null,
             creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
             participant_reminder_sent: raidData.participantReminderSent ? 1 : 0
         });

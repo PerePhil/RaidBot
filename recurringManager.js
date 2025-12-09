@@ -5,7 +5,7 @@
 
 const { db, prepare, transaction } = require('./db/database');
 const { templatesForGuild, deriveSlug } = require('./templatesManager');
-const { getRaidChannel, getMuseumChannel, setActiveRaid, getActiveRaid } = require('./state');
+const { getRaidChannel, getMuseumChannel, setActiveRaid, getActiveRaid, getGuildSettings } = require('./state');
 
 // In-memory cache
 const recurringRaids = new Map(); // id -> recurring data
@@ -413,6 +413,22 @@ async function spawnRaidFromRecurring(client, recurring) {
     } catch (error) {
         console.error(`Failed to send raid message for recurring ${recurring.id}:`, error);
         return null;
+    }
+
+    // Create discussion thread if enabled
+    const settings = getGuildSettings(recurring.guildId);
+    if (settings.threadsEnabled) {
+        try {
+            const threadName = isMuseum ? `Museum - ${raidId}` : `${template?.name || 'Raid'} - ${raidId}`;
+            const thread = await message.startThread({
+                name: threadName,
+                autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
+            });
+            raidData.threadId = thread.id;
+            await thread.send(`💬 Discussion thread for **${threadName}**\n⏰ Raid time: <t:${raidTimestamp}:F>\n🔄 This is a recurring raid.`);
+        } catch (error) {
+            console.error(`Failed to create thread for recurring raid ${recurring.id}:`, error);
+        }
     }
 
     // Save the raid

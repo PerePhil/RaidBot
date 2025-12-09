@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS guilds (
   last_auto_close_seconds INTEGER DEFAULT 3600,
   creator_reminders_enabled INTEGER DEFAULT 1,
   participant_reminders_enabled INTEGER DEFAULT 1,
-  raid_leader_role_id TEXT
+  raid_leader_role_id TEXT,
+  threads_enabled INTEGER DEFAULT 0,
+  thread_auto_archive_minutes INTEGER DEFAULT 1440
 );
 
 -- Active raids (most critical table)
@@ -35,6 +37,7 @@ CREATE TABLE IF NOT EXISTS raids (
   creator_id TEXT,
   max_slots INTEGER,
   recurring_id TEXT,  -- Link to recurring_raids.id if spawned from recurring
+  thread_id TEXT,     -- Discussion thread ID
   creator_reminder_sent INTEGER DEFAULT 0,
   participant_reminder_sent INTEGER DEFAULT 0,
   created_at INTEGER DEFAULT (unixepoch()),

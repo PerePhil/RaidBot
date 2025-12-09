@@ -104,22 +104,22 @@ module.exports = {
                         const json = comp.toJSON();
                         json.disabled = true;
                         switch (json.type) {
-                        case 2: // button
-                            return ButtonBuilder.from(json);
-                        case 3: // string select
-                            return StringSelectMenuBuilder.from(json);
-                        case 6: // role select
-                            return RoleSelectMenuBuilder.from(json);
-                        case 8: // channel select
-                            return ChannelSelectMenuBuilder.from(json);
-                        default:
-                            return ButtonBuilder.from(json);
+                            case 2: // button
+                                return ButtonBuilder.from(json);
+                            case 3: // string select
+                                return StringSelectMenuBuilder.from(json);
+                            case 6: // role select
+                                return RoleSelectMenuBuilder.from(json);
+                            case 8: // channel select
+                                return ChannelSelectMenuBuilder.from(json);
+                            default:
+                                return ButtonBuilder.from(json);
                         }
                     })
                 );
                 return newRow;
             });
-            await message.edit({ components: disabledComponents }).catch(() => {});
+            await message.edit({ components: disabledComponents }).catch(() => { });
         });
     }
 };
@@ -128,27 +128,32 @@ function buildSettingsEmbed(guild, settings) {
     const leaderRoleLabel = formatLeaderRole(guild, settings.raidLeaderRoleId);
     return new EmbedBuilder()
         .setTitle(`${guild.name} • Settings`)
-        .setDescription('Configure reminders, auto-close timing, and an optional raid leader marker. Use the buttons and dropdowns below.')
+        .setDescription('Configure reminders, auto-close timing, threads, and an optional raid leader marker. Use the buttons and dropdowns below.')
         .addFields(
             {
                 name: 'Creator reminders',
                 value: settings.creatorRemindersEnabled ? `${settings.creatorReminderSeconds / 60} min before start` : 'Disabled',
-                inline: false
+                inline: true
             },
             {
                 name: 'Participant reminders',
                 value: settings.participantRemindersEnabled ? `${settings.participantReminderSeconds / 60} min before start` : 'Disabled',
-                inline: false
+                inline: true
             },
             {
                 name: 'Auto-close full raids',
                 value: settings.autoCloseSeconds > 0 ? `${settings.autoCloseSeconds / 60} min before start` : 'Disabled',
-                inline: false
+                inline: true
+            },
+            {
+                name: 'Discussion threads',
+                value: settings.threadsEnabled ? 'Enabled (auto-created per raid)' : 'Disabled',
+                inline: true
             },
             {
                 name: 'Raid leader role',
                 value: leaderRoleLabel,
-                inline: false
+                inline: true
             }
         );
 }
@@ -157,19 +162,23 @@ function buildComponents(settings) {
     const toggleRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('settings:toggle:creatorRemindersEnabled')
-            .setLabel(`Creator reminders: ${settings.creatorRemindersEnabled ? 'On' : 'Off'}`)
+            .setLabel(`Creator: ${settings.creatorRemindersEnabled ? 'On' : 'Off'}`)
             .setStyle(settings.creatorRemindersEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder()
             .setCustomId('settings:toggle:participantRemindersEnabled')
-            .setLabel(`Participant reminders: ${settings.participantRemindersEnabled ? 'On' : 'Off'}`)
+            .setLabel(`Participant: ${settings.participantRemindersEnabled ? 'On' : 'Off'}`)
             .setStyle(settings.participantRemindersEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder()
             .setCustomId('settings:toggle:autoCloseSeconds')
             .setLabel(`Auto-close: ${settings.autoCloseSeconds > 0 ? 'On' : 'Off'}`)
             .setStyle(settings.autoCloseSeconds > 0 ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder()
+            .setCustomId('settings:toggle:threadsEnabled')
+            .setLabel(`Threads: ${settings.threadsEnabled ? 'On' : 'Off'}`)
+            .setStyle(settings.threadsEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder()
             .setCustomId('settings:clear:raidLeaderRoleId')
-            .setLabel('Clear raid leader role')
+            .setLabel('Clear leader')
             .setStyle(ButtonStyle.Danger)
             .setDisabled(!settings.raidLeaderRoleId)
     );

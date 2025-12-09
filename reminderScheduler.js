@@ -3,6 +3,7 @@ const { getPresenceClient, updateBotPresence } = require('./presence');
 const { buildMessageLink, formatTimeLabel } = require('./utils/raidFormatters');
 const { fetchRaidMessage, closeRaidSignup, isRaidFull } = require('./utils/raidHelpers');
 const { sendAuditLog } = require('./auditLog');
+const { checkAndSpawnRecurringRaids } = require('./recurringManager');
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const DM_DELAY_MS = 10 * 1000;
@@ -62,6 +63,13 @@ async function runReminderCheck() {
         if (updated) {
             markActiveRaidUpdated(messageId);
         }
+    }
+
+    // Check and spawn any due recurring raids
+    try {
+        await checkAndSpawnRecurringRaids(client);
+    } catch (error) {
+        console.error('Failed to check recurring raids:', error);
     }
 }
 

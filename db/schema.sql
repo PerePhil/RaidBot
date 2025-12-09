@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS raids (
   strategy TEXT,
   creator_id TEXT,
   max_slots INTEGER,
+  recurring_id TEXT,  -- Link to recurring_raids.id if spawned from recurring
   creator_reminder_sent INTEGER DEFAULT 0,
   participant_reminder_sent INTEGER DEFAULT 0,
   created_at INTEGER DEFAULT (unixepoch()),
@@ -148,6 +149,36 @@ CREATE TABLE IF NOT EXISTS custom_templates (
   role_groups TEXT  -- JSON array
 );
 
+-- Recurring raid schedules
+CREATE TABLE IF NOT EXISTS recurring_raids (
+  id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT,                -- Override channel (null = use default)
+  template_slug TEXT NOT NULL,    -- e.g., 'dragonspyre', 'lemuria', 'museum'
+  template_data TEXT,             -- JSON for custom template
+  
+  -- Schedule
+  schedule_type TEXT NOT NULL,    -- 'weekly', 'daily', 'interval'
+  day_of_week INTEGER,            -- 0-6 for weekly (0=Sunday)
+  time_of_day TEXT,               -- 'HH:MM' in 24h format
+  interval_hours INTEGER,         -- For interval type
+  timezone TEXT DEFAULT 'America/New_York',
+  
+  -- Configuration
+  length TEXT,                    -- '1.5' or '3'
+  strategy TEXT,                  -- 'triple storm', etc.
+  copy_participants INTEGER DEFAULT 0,  -- Copy signups from previous
+  advance_hours INTEGER DEFAULT 24,     -- How early to create next instance
+  
+  -- State
+  creator_id TEXT NOT NULL,
+  enabled INTEGER DEFAULT 1,
+  last_created_at INTEGER,        -- Timestamp of last instance
+  last_message_id TEXT,           -- Message ID of last instance
+  next_scheduled_at INTEGER,      -- Pre-computed next trigger time
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_raids_guild ON raids(guild_id);
 CREATE INDEX IF NOT EXISTS idx_raids_timestamp ON raids(timestamp);
@@ -157,3 +188,6 @@ CREATE INDEX IF NOT EXISTS idx_signups_user ON signups(user_id);
 CREATE INDEX IF NOT EXISTS idx_guild_user_stats_guild ON guild_user_stats(guild_id);
 CREATE INDEX IF NOT EXISTS idx_availability_guild ON availability(guild_id);
 CREATE INDEX IF NOT EXISTS idx_custom_templates_guild ON custom_templates(guild_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_guild ON recurring_raids(guild_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_next ON recurring_raids(next_scheduled_at);
+

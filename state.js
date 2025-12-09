@@ -57,10 +57,10 @@ function getStatements() {
         insertRaid: prepare(`
             INSERT INTO raids (message_id, raid_id, guild_id, channel_id, type,
                 template_slug, template_data, datetime, timestamp, length, strategy,
-                creator_id, max_slots, creator_reminder_sent, participant_reminder_sent)
+                creator_id, max_slots, recurring_id, creator_reminder_sent, participant_reminder_sent)
             VALUES (@message_id, @raid_id, @guild_id, @channel_id, @type,
                 @template_slug, @template_data, @datetime, @timestamp, @length, @strategy,
-                @creator_id, @max_slots, @creator_reminder_sent, @participant_reminder_sent)
+                @creator_id, @max_slots, @recurring_id, @creator_reminder_sent, @participant_reminder_sent)
         `),
         updateRaid: prepare(`
             UPDATE raids SET
@@ -403,6 +403,7 @@ function reconstructRaidData(raid, signups) {
         creatorId: raid.creator_id,
         guildId: raid.guild_id,
         channelId: raid.channel_id,
+        recurringId: raid.recurring_id || null,
         creatorReminderSent: raid.creator_reminder_sent === 1,
         participantReminderSent: raid.participant_reminder_sent === 1
     };
@@ -482,6 +483,7 @@ function setActiveRaid(messageId, raidData, options = {}) {
             strategy: raidData.strategy || null,
             creator_id: raidData.creatorId,
             max_slots: raidData.maxSlots || null,
+            recurring_id: raidData.recurringId || null,
             creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
             participant_reminder_sent: raidData.participantReminderSent ? 1 : 0
         });

@@ -24,6 +24,7 @@ const { loadAvailability } = require('./availabilityManager');
 const { loadAnalytics } = require('./utils/analytics');
 const { logger } = require('./utils/logger');
 const { close: closeDatabase } = require('./db/database');
+const { loadRecurringRaids } = require('./recurringManager');
 
 const CLIENT_ID = config.clientId;
 const TOKEN = config.token;
@@ -57,6 +58,7 @@ client.once('clientReady', async () => {
     loadCommandRoles();
     loadSignupRoles();
     loadAnalytics();
+    loadRecurringRaids();
 
     try {
         await enforceGuildAllowlist();

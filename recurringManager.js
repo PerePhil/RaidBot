@@ -100,7 +100,7 @@ function rowToRecurring(row) {
         length: row.length,
         strategy: row.strategy,
         copyParticipants: row.copy_participants === 1,
-        advanceHours: row.advance_hours || 24,
+        advanceHours: row.advance_hours || 0, // Default: spawn at raid time
         creatorId: row.creator_id,
         enabled: row.enabled === 1,
         lastCreatedAt: row.last_created_at,
@@ -230,7 +230,7 @@ function getGuildRecurringRaids(guildId) {
 function calculateNextScheduledTime(recurring) {
     const now = new Date();
     const tz = recurring.timezone || 'America/New_York';
-    const advanceMs = (recurring.advanceHours || 24) * 60 * 60 * 1000;
+    const advanceMs = (recurring.advanceHours ?? 0) * 60 * 60 * 1000; // Default 0 = spawn at raid time
 
     let raidTime;
 

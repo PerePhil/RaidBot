@@ -308,7 +308,7 @@ async function finishCreate(interaction, state, collector) {
         intervalHours: state.intervalHours,
         timezone: state.timezone || 'America/New_York',
         copyParticipants: state.copyParticipants,
-        advanceHours: 24,
+        advanceHours: 0, // Spawn at raid time (not before)
         creatorId: state.creatorId
     });
 

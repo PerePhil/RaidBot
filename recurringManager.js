@@ -360,7 +360,27 @@ async function checkAndSpawnRecurringRaids(client) {
 
     for (const row of dueRaids) {
         const recurring = rowToRecurring(row);
+
+        // Safeguard: don't spawn if we spawned within the last hour
+        const minSpawnInterval = 60 * 60; // 1 hour in seconds
+        if (recurring.lastCreatedAt && (now - recurring.lastCreatedAt) < minSpawnInterval) {
+            console.log(`Skipping recurring ${recurring.id}: spawned ${now - recurring.lastCreatedAt}s ago (min: ${minSpawnInterval}s)`);
+
+            // Fix the next_scheduled_at to prevent repeated triggering
+            const nextScheduled = calculateNextScheduledTime(recurring);
+            stmts.updateAfterSpawn.run({
+                id: recurring.id,
+                last_created_at: recurring.lastCreatedAt,
+                last_message_id: recurring.lastMessageId,
+                next_scheduled_at: nextScheduled
+            });
+            recurring.nextScheduledAt = nextScheduled;
+            recurringRaids.set(recurring.id, recurring);
+            continue;
+        }
+
         try {
+            console.log(`Spawning recurring raid ${recurring.id} (type: ${recurring.scheduleType}, time: ${recurring.timeOfDay})`);
             await spawnRaidFromRecurring(client, recurring);
         } catch (error) {
             console.error(`Failed to spawn recurring raid ${recurring.id}:`, error);

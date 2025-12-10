@@ -178,6 +178,14 @@ async function handleCreateStep(interaction, state, collector) {
         state.dayOfWeek = parseInt(interaction.values[0], 10);
         await showTimeModal(interaction, state, collector);
     }
+    else if (interaction.customId === 'recurring_spawn_option') {
+        if (interaction.values[0] === 'custom') {
+            await showSpawnModal(interaction, state, collector);
+        } else {
+            // No custom spawn, go to copy participants
+            await showCopyOption(interaction, state, collector);
+        }
+    }
     else if (interaction.customId === 'recurring_copy') {
         state.copyParticipants = interaction.values[0] === 'yes';
         await finishCreate(interaction, state, collector);
@@ -219,19 +227,19 @@ async function showTimeModal(interaction, state, collector) {
         state.timeOfDay = modalSubmit.fields.getTextInputValue('time') || '19:00';
         state.timezone = modalSubmit.fields.getTextInputValue('timezone') || 'America/New_York';
 
-        // Show copy participants option
+        // Ask about custom spawn schedule
         const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
-                .setCustomId('recurring_copy')
-                .setPlaceholder('Copy participants?')
+                .setCustomId('recurring_spawn_option')
+                .setPlaceholder('When should signups spawn?')
                 .addOptions([
-                    { label: 'Yes', value: 'yes', description: 'Pre-register participants from previous instance' },
-                    { label: 'No', value: 'no', description: 'Start with empty signups each time' }
+                    { label: 'At raid time', value: 'raid_time', description: 'Signup appears when raid starts' },
+                    { label: 'Custom time', value: 'custom', description: 'Set a specific day/time for signups' }
                 ])
         );
 
         await modalSubmit.reply({
-            content: '**Create Recurring Raid** (Step 5/5)\nCopy participants from previous instance?',
+            content: '**Create Recurring Raid** (Step 4/6)\\nWhen should the signup message appear?',
             components: [row],
             flags: MessageFlags.Ephemeral
         });
@@ -240,6 +248,72 @@ async function showTimeModal(interaction, state, collector) {
             console.error('Modal error:', error);
         }
     }
+}
+
+async function showSpawnModal(interaction, state, collector) {
+    const modal = new ModalBuilder()
+        .setCustomId('recurring_spawn_modal')
+        .setTitle('Spawn Schedule')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('spawn_day')
+                    .setLabel('Spawn day (0=Sun, 1=Mon, ... 6=Sat)')
+                    .setPlaceholder('1')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            ),
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('spawn_time')
+                    .setLabel('Spawn time (e.g., 10am, 10:00)')
+                    .setPlaceholder('10am')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            )
+        );
+
+    await interaction.showModal(modal);
+
+    try {
+        const modalSubmit = await interaction.awaitModalSubmit({
+            filter: i => i.customId === 'recurring_spawn_modal' && i.user.id === interaction.user.id,
+            time: 120000
+        });
+
+        const spawnDayInput = modalSubmit.fields.getTextInputValue('spawn_day');
+        state.spawnDayOfWeek = parseInt(spawnDayInput, 10);
+        if (isNaN(state.spawnDayOfWeek) || state.spawnDayOfWeek < 0 || state.spawnDayOfWeek > 6) {
+            state.spawnDayOfWeek = 1; // Default Monday
+        }
+        state.spawnTimeOfDay = modalSubmit.fields.getTextInputValue('spawn_time') || '10:00';
+
+        await showCopyOption(modalSubmit, state, collector);
+    } catch (error) {
+        if (error.code !== 'InteractionCollectorError') {
+            console.error('Modal error:', error);
+        }
+    }
+}
+
+async function showCopyOption(interaction, state, collector) {
+    const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('recurring_copy')
+            .setPlaceholder('Copy participants?')
+            .addOptions([
+                { label: 'Yes', value: 'yes', description: 'Pre-register participants from previous instance' },
+                { label: 'No', value: 'no', description: 'Start with empty signups each time' }
+            ])
+    );
+
+    // Handle both update and reply depending on interaction type
+    const replyFn = interaction.replied || interaction.deferred ? 'followUp' : 'reply';
+    await interaction[replyFn]({
+        content: '**Create Recurring Raid** (Step 6/6)\\nCopy participants from previous instance?',
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
 }
 
 async function showIntervalModal(interaction, state, collector) {
@@ -308,7 +382,9 @@ async function finishCreate(interaction, state, collector) {
         intervalHours: state.intervalHours,
         timezone: state.timezone || 'America/New_York',
         copyParticipants: state.copyParticipants,
-        advanceHours: 0, // Spawn at raid time (not before)
+        advanceHours: 0,
+        spawnDayOfWeek: state.spawnDayOfWeek,       // Custom spawn day (null = same as raid)
+        spawnTimeOfDay: state.spawnTimeOfDay,       // Custom spawn time (null = same as raid)
         creatorId: state.creatorId
     });
 

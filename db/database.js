@@ -58,6 +58,9 @@ function runMigrations() {
         { table: 'guilds', column: 'thread_auto_archive_minutes', sql: 'ALTER TABLE guilds ADD COLUMN thread_auto_archive_minutes INTEGER DEFAULT 1440' },
         { table: 'raids', column: 'thread_id', sql: 'ALTER TABLE raids ADD COLUMN thread_id TEXT' },
         { table: 'raids', column: 'recurring_id', sql: 'ALTER TABLE raids ADD COLUMN recurring_id TEXT' },
+        // Spawn schedule support (added Dec 2024)
+        { table: 'recurring_raids', column: 'spawn_day_of_week', sql: 'ALTER TABLE recurring_raids ADD COLUMN spawn_day_of_week INTEGER' },
+        { table: 'recurring_raids', column: 'spawn_time_of_day', sql: 'ALTER TABLE recurring_raids ADD COLUMN spawn_time_of_day TEXT' },
     ];
 
     for (const migration of migrations) {

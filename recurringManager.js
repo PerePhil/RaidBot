@@ -29,11 +29,13 @@ function getStatements() {
                 id, guild_id, channel_id, template_slug, template_data,
                 schedule_type, day_of_week, time_of_day, interval_hours, timezone,
                 length, strategy, copy_participants, advance_hours,
+                spawn_day_of_week, spawn_time_of_day,
                 creator_id, enabled, next_scheduled_at, created_at
             ) VALUES (
                 @id, @guild_id, @channel_id, @template_slug, @template_data,
                 @schedule_type, @day_of_week, @time_of_day, @interval_hours, @timezone,
                 @length, @strategy, @copy_participants, @advance_hours,
+                @spawn_day_of_week, @spawn_time_of_day,
                 @creator_id, @enabled, @next_scheduled_at, unixepoch()
             )
         `),
@@ -52,6 +54,8 @@ function getStatements() {
                 strategy = @strategy,
                 copy_participants = @copy_participants,
                 advance_hours = @advance_hours,
+                spawn_day_of_week = @spawn_day_of_week,
+                spawn_time_of_day = @spawn_time_of_day,
                 enabled = @enabled,
                 next_scheduled_at = @next_scheduled_at
             WHERE id = @id
@@ -100,7 +104,9 @@ function rowToRecurring(row) {
         length: row.length,
         strategy: row.strategy,
         copyParticipants: row.copy_participants === 1,
-        advanceHours: row.advance_hours || 0, // Default: spawn at raid time
+        advanceHours: row.advance_hours || 0,
+        spawnDayOfWeek: row.spawn_day_of_week,     // Custom spawn day (null = same as raid)
+        spawnTimeOfDay: row.spawn_time_of_day,     // Custom spawn time (null = same as raid)
         creatorId: row.creator_id,
         enabled: row.enabled === 1,
         lastCreatedAt: row.last_created_at,
@@ -133,7 +139,9 @@ function createRecurringRaid(data) {
         length: data.length || null,
         strategy: data.strategy || null,
         copy_participants: data.copyParticipants ? 1 : 0,
-        advance_hours: data.advanceHours || 24,
+        advance_hours: data.advanceHours ?? 0,
+        spawn_day_of_week: data.spawnDayOfWeek ?? null,
+        spawn_time_of_day: data.spawnTimeOfDay || null,
         creator_id: data.creatorId,
         enabled: 1,
         next_scheduled_at: nextScheduledAt
@@ -175,7 +183,9 @@ function updateRecurringRaid(id, updates) {
         length: merged.length || null,
         strategy: merged.strategy || null,
         copy_participants: merged.copyParticipants ? 1 : 0,
-        advance_hours: merged.advanceHours || 24,
+        advance_hours: merged.advanceHours ?? 0,
+        spawn_day_of_week: merged.spawnDayOfWeek ?? null,
+        spawn_time_of_day: merged.spawnTimeOfDay || null,
         enabled: merged.enabled ? 1 : 0,
         next_scheduled_at: nextScheduledAt
     });
@@ -225,13 +235,34 @@ function getGuildRecurringRaids(guildId) {
 /**
  * Calculate the next scheduled spawn time based on schedule type
  * Returns Unix timestamp (seconds) when we should CREATE the raid
- * (which is advanceHours before the actual raid time)
+ * 
+ * If spawnDayOfWeek/spawnTimeOfDay are set, uses those for spawn timing
+ * Otherwise, spawn time = raid time (advanceHours is deprecated but still supported)
  */
 function calculateNextScheduledTime(recurring) {
     const now = new Date();
     const tz = recurring.timezone || 'America/New_York';
-    const advanceMs = (recurring.advanceHours ?? 0) * 60 * 60 * 1000; // Default 0 = spawn at raid time
 
+    // Check if custom spawn schedule is set
+    const hasCustomSpawn = recurring.spawnDayOfWeek != null || recurring.spawnTimeOfDay != null;
+
+    if (hasCustomSpawn) {
+        // Use custom spawn day/time
+        const spawnDay = recurring.spawnDayOfWeek ?? 0; // Default Sunday if only time is set
+        const spawnTimeStr = recurring.spawnTimeOfDay || recurring.timeOfDay || '10:00';
+
+        let spawnTime = getNextWeeklyTime(now, spawnDay, spawnTimeStr, tz);
+
+        // If spawn time is in the past, get next week
+        while (spawnTime <= now) {
+            spawnTime = new Date(spawnTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+        }
+
+        return Math.floor(spawnTime.getTime() / 1000);
+    }
+
+    // No custom spawn - spawn at raid time (original behavior)
+    const advanceMs = (recurring.advanceHours ?? 0) * 60 * 60 * 1000;
     let raidTime;
 
     if (recurring.scheduleType === 'weekly') {
@@ -653,15 +684,33 @@ function formatScheduleDescription(recurring) {
 
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+    let desc;
     if (recurring.scheduleType === 'weekly') {
         const day = days[recurring.dayOfWeek] || 'Unknown';
-        return `Weekly on ${day} at ${time12}`;
+        desc = `Weekly on ${day} at ${time12}`;
     } else if (recurring.scheduleType === 'daily') {
-        return `Daily at ${time12}`;
+        desc = `Daily at ${time12}`;
     } else if (recurring.scheduleType === 'interval') {
-        return `Every ${recurring.intervalHours} hours`;
+        desc = `Every ${recurring.intervalHours} hours`;
+    } else {
+        desc = 'Unknown schedule';
     }
-    return 'Unknown schedule';
+
+    // Add spawn schedule if custom
+    if (recurring.spawnDayOfWeek != null || recurring.spawnTimeOfDay != null) {
+        const spawnDay = recurring.spawnDayOfWeek != null ? days[recurring.spawnDayOfWeek] : null;
+        const spawnTimeStr = recurring.spawnTimeOfDay || timeStr;
+        const [sh, sm] = parseTimeOfDay(spawnTimeStr);
+        const spawnTime12 = `${sh > 12 ? sh - 12 : sh || 12}:${sm.toString().padStart(2, '0')} ${sh >= 12 ? 'PM' : 'AM'}`;
+
+        if (spawnDay) {
+            desc += `\nSpawns: ${spawnDay} at ${spawnTime12}`;
+        } else {
+            desc += `\nSpawns at: ${spawnTime12}`;
+        }
+    }
+
+    return desc;
 }
 
 module.exports = {

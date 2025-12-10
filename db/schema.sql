@@ -171,7 +171,11 @@ CREATE TABLE IF NOT EXISTS recurring_raids (
   length TEXT,                    -- '1.5' or '3'
   strategy TEXT,                  -- 'triple storm', etc.
   copy_participants INTEGER DEFAULT 0,  -- Copy signups from previous
-  advance_hours INTEGER DEFAULT 24,     -- How early to create next instance
+  advance_hours INTEGER DEFAULT 0,      -- How early to create (deprecated, use spawn schedule)
+  
+  -- Custom spawn schedule (optional, defaults to raid time)
+  spawn_day_of_week INTEGER,      -- 0-6 for custom spawn day (null = same as raid)
+  spawn_time_of_day TEXT,         -- 'HH:MM' for custom spawn time (null = same as raid)
   
   -- State
   creator_id TEXT NOT NULL,

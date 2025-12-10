@@ -5,7 +5,8 @@
 
 const { db, prepare, transaction } = require('./db/database');
 const { templatesForGuild, deriveSlug } = require('./templatesManager');
-const { getRaidChannel, getMuseumChannel, setActiveRaid, getActiveRaid, getGuildSettings } = require('./state');
+const { raidChannels, museumChannels, setActiveRaid, getActiveRaid, getGuildSettings } = require('./state');
+const chrono = require('chrono-node');
 
 // In-memory cache
 const recurringRaids = new Map(); // id -> recurring data
@@ -303,10 +304,36 @@ function getNextDailyTime(now, timeOfDay, tz) {
 
 function parseTimeOfDay(timeStr) {
     if (!timeStr) return [19, 0]; // Default 7pm
-    const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-    if (match) {
-        return [parseInt(match[1], 10), parseInt(match[2], 10)];
+
+    // Try 24h format first (e.g., "19:00")
+    const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+    if (match24) {
+        return [parseInt(match24[1], 10), parseInt(match24[2], 10)];
     }
+
+    // Try 12h format (e.g., "7:00 PM", "7pm", "7 PM")
+    const match12 = timeStr.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)$/i);
+    if (match12) {
+        let hours = parseInt(match12[1], 10);
+        const minutes = match12[2] ? parseInt(match12[2], 10) : 0;
+        const isPM = match12[3].toLowerCase() === 'pm';
+
+        if (isPM && hours !== 12) hours += 12;
+        if (!isPM && hours === 12) hours = 0;
+
+        return [hours, minutes];
+    }
+
+    // Try natural language with chrono-node (e.g., "tomorrow at 7pm" -> extract time)
+    try {
+        const parsed = chrono.parseDate(timeStr);
+        if (parsed) {
+            return [parsed.getHours(), parsed.getMinutes()];
+        }
+    } catch (e) {
+        // Ignore parsing errors
+    }
+
     return [19, 0];
 }
 
@@ -343,9 +370,9 @@ async function spawnRaidFromRecurring(client, recurring) {
     let channelId = recurring.channelId;
     if (!channelId) {
         if (recurring.templateSlug === 'museum') {
-            channelId = getMuseumChannel(recurring.guildId);
+            channelId = museumChannels.get(recurring.guildId);
         } else {
-            channelId = getRaidChannel(recurring.guildId);
+            channelId = raidChannels.get(recurring.guildId);
         }
     }
 

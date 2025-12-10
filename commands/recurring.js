@@ -23,7 +23,7 @@ const {
 } = require('../recurringManager');
 
 const { templatesForGuild } = require('../templatesManager');
-const { getRaidChannel, getMuseumChannel } = require('../state');
+const { raidChannels, museumChannels } = require('../state');
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -192,8 +192,8 @@ async function showTimeModal(interaction, state, collector) {
             new ActionRowBuilder().addComponents(
                 new TextInputBuilder()
                     .setCustomId('time')
-                    .setLabel('Time (24h format, e.g., 19:00)')
-                    .setPlaceholder('19:00')
+                    .setLabel('Time (e.g., 7pm, 7:00 PM, 19:00)')
+                    .setPlaceholder('7pm')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
             ),

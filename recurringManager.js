@@ -6,6 +6,7 @@
 const { db, prepare, transaction } = require('./db/database');
 const { templatesForGuild, deriveSlug } = require('./templatesManager');
 const { raidChannels, museumChannels, setActiveRaid, getActiveRaid, getGuildSettings } = require('./state');
+const { EmbedBuilder } = require('discord.js');
 const chrono = require('chrono-node');
 
 // In-memory cache
@@ -429,14 +430,70 @@ async function spawnRaidFromRecurring(client, recurring) {
         await copyParticipantsFromPrevious(client, recurring, raidData);
     }
 
-    // Create the raid message
-    const { buildRaidEmbed, buildRaidComponents } = require('./raids/embedBuilder');
-    const embed = buildRaidEmbed(raidData);
-    const components = buildRaidComponents(raidData);
+    // Create the raid message embed
+    let embed;
+    if (isMuseum) {
+        embed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('🏛️ Museum Signup! 🏛️')
+            .setDescription('React below to sign up for the museum run!')
+            .addFields(
+                { name: '\n**Date + Time:**', value: `<t:${raidTimestamp}:F>`, inline: false },
+                { name: '\n**Signups (0/12):**', value: '*No signups yet*', inline: false },
+                { name: '\u200b', value: `*Raid ID: \`${raidId}\`*\n🔄 Recurring raid`, inline: false }
+            )
+            .setTimestamp(new Date(raidTimestamp * 1000));
+    } else {
+        const timestampStr = `<t:${raidTimestamp}:F>`;
+        const lengthBadge = recurring.length ? `\`${recurring.length} HOUR KEY\`` : '';
+
+        const fields = [
+            {
+                name: '\n**Date + Time:**',
+                value: lengthBadge ? `${timestampStr} || ${lengthBadge}` : timestampStr,
+                inline: false
+            }
+        ];
+
+        // Add role groups
+        if (template.roleGroups) {
+            for (const group of template.roleGroups) {
+                fields.push({
+                    name: `\n**${group.name}:**`,
+                    value: group.roles.map(role => `${role.emoji} ${role.icon || ''} ${role.name}`).join('\n'),
+                    inline: false
+                });
+            }
+        }
+
+        fields.push({
+            name: '\u200b',
+            value: `*Raid ID: \`${raidId}\`*\n🔄 Recurring raid`,
+            inline: false
+        });
+
+        embed = new EmbedBuilder()
+            .setColor(template.color || '#0099ff')
+            .setTitle(`${template.emoji || ''} ${template.name}! ${template.emoji || ''}`)
+            .setDescription(template.description || '')
+            .setFields(fields)
+            .setTimestamp(new Date(raidTimestamp * 1000));
+    }
 
     let message;
     try {
-        message = await channel.send({ embeds: [embed], components });
+        message = await channel.send({ embeds: [embed] });
+
+        // Add reactions for museum or raid roles
+        if (isMuseum) {
+            await message.react('✅');
+        } else if (template.roleGroups) {
+            for (const group of template.roleGroups) {
+                for (const role of group.roles) {
+                    await message.react(role.emoji);
+                }
+            }
+        }
     } catch (error) {
         console.error(`Failed to send raid message for recurring ${recurring.id}:`, error);
         return null;

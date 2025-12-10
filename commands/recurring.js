@@ -24,8 +24,36 @@ const {
 
 const { templatesForGuild } = require('../templatesManager');
 const { raidChannels, museumChannels } = require('../state');
+const chrono = require('chrono-node');
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Parse day of week from string input
+ * Accepts: day names (Monday), abbreviations (Mon), numbers (1)
+ * Returns: 0-6 (Sunday-Saturday) or null if not recognized
+ */
+function parseDayOfWeek(input) {
+    if (!input) return null;
+    const lower = input.toLowerCase().trim();
+
+    // Try number first
+    const num = parseInt(lower, 10);
+    if (!isNaN(num) && num >= 0 && num <= 6) return num;
+
+    // Try day name or abbreviation
+    const dayMap = {
+        'sunday': 0, 'sun': 0, 'su': 0,
+        'monday': 1, 'mon': 1, 'mo': 1,
+        'tuesday': 2, 'tue': 2, 'tu': 2,
+        'wednesday': 3, 'wed': 3, 'we': 3,
+        'thursday': 4, 'thu': 4, 'th': 4,
+        'friday': 5, 'fri': 5, 'fr': 5,
+        'saturday': 6, 'sat': 6, 'sa': 6
+    };
+
+    return dayMap[lower] ?? null;
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -258,8 +286,8 @@ async function showSpawnModal(interaction, state, collector) {
             new ActionRowBuilder().addComponents(
                 new TextInputBuilder()
                     .setCustomId('spawn_day')
-                    .setLabel('Spawn day (0=Sun, 1=Mon, ... 6=Sat)')
-                    .setPlaceholder('1')
+                    .setLabel('Spawn day (e.g., Monday, Friday)')
+                    .setPlaceholder('Monday')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
             ),
@@ -282,11 +310,22 @@ async function showSpawnModal(interaction, state, collector) {
         });
 
         const spawnDayInput = modalSubmit.fields.getTextInputValue('spawn_day');
-        state.spawnDayOfWeek = parseInt(spawnDayInput, 10);
-        if (isNaN(state.spawnDayOfWeek) || state.spawnDayOfWeek < 0 || state.spawnDayOfWeek > 6) {
-            state.spawnDayOfWeek = 1; // Default Monday
+        const spawnTimeInput = modalSubmit.fields.getTextInputValue('spawn_time') || '10:00';
+
+        // Parse day using chrono-node or day name matching
+        let spawnDay = parseDayOfWeek(spawnDayInput);
+        if (spawnDay === null) {
+            // Try chrono-node for natural language
+            const parsed = chrono.parseDate(spawnDayInput + ' at noon');
+            if (parsed) {
+                spawnDay = parsed.getDay();
+            } else {
+                spawnDay = 1; // Default Monday
+            }
         }
-        state.spawnTimeOfDay = modalSubmit.fields.getTextInputValue('spawn_time') || '10:00';
+
+        state.spawnDayOfWeek = spawnDay;
+        state.spawnTimeOfDay = spawnTimeInput;
 
         await showCopyOption(modalSubmit, state, collector);
     } catch (error) {

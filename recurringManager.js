@@ -230,13 +230,28 @@ function getGuildRecurringRaids(guildId) {
 function calculateNextScheduledTime(recurring) {
     const now = new Date();
     const tz = recurring.timezone || 'America/New_York';
+    const advanceMs = (recurring.advanceHours || 24) * 60 * 60 * 1000;
 
     let raidTime;
 
     if (recurring.scheduleType === 'weekly') {
         raidTime = getNextWeeklyTime(now, recurring.dayOfWeek, recurring.timeOfDay, tz);
+
+        // If spawn time (raid time - advance) is in the past, get next week
+        let spawnTime = new Date(raidTime.getTime() - advanceMs);
+        while (spawnTime <= now) {
+            raidTime = new Date(raidTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+            spawnTime = new Date(raidTime.getTime() - advanceMs);
+        }
     } else if (recurring.scheduleType === 'daily') {
         raidTime = getNextDailyTime(now, recurring.timeOfDay, tz);
+
+        // If spawn time (raid time - advance) is in the past, get next day
+        let spawnTime = new Date(raidTime.getTime() - advanceMs);
+        while (spawnTime <= now) {
+            raidTime = new Date(raidTime.getTime() + 24 * 60 * 60 * 1000);
+            spawnTime = new Date(raidTime.getTime() - advanceMs);
+        }
     } else if (recurring.scheduleType === 'interval') {
         // For interval, base off last created time or now
         const baseTime = recurring.lastCreatedAt
@@ -254,12 +269,7 @@ function calculateNextScheduledTime(recurring) {
     }
 
     // Spawn time is advanceHours before raid time
-    const spawnTime = new Date(raidTime.getTime() - (recurring.advanceHours || 24) * 60 * 60 * 1000);
-
-    // If spawn time is in the past, use now (spawn immediately)
-    if (spawnTime <= now) {
-        return Math.floor(now.getTime() / 1000);
-    }
+    const spawnTime = new Date(raidTime.getTime() - advanceMs);
 
     return Math.floor(spawnTime.getTime() / 1000);
 }

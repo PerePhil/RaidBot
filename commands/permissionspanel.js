@@ -1,8 +1,12 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, RoleSelectMenuBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const { getAdminRoles, setAdminRoles, getCommandRoles, setCommandRoles, getSignupRoles, setSignupRoles } = require('../state');
 
-const ADMIN_COMMANDS = ['create', 'raid', 'raidsignup', 'setchannel', 'settings', 'templates', 'permissions'];
-const SPECIAL_ENTRIES = [{ label: 'Raid signup', value: 'signup_raid' }, { label: 'Museum signup', value: 'signup_museum' }];
+const ADMIN_COMMANDS = ['create', 'raid', 'raidsignup', 'setchannel', 'settings', 'templates', 'permissions', 'recurring'];
+const SPECIAL_ENTRIES = [
+    { label: 'Raid signup', value: 'signup_raid' },
+    { label: 'Museum signup', value: 'signup_museum' },
+    { label: 'View others\' stats', value: 'stats_others' }
+];
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -32,6 +36,8 @@ module.exports = {
                     setSignupRoles(guildId, roleIds);
                 } else if (state.selectedCommand === 'signup_museum') {
                     setSignupRoles(`${guildId}:museum`, roleIds);
+                } else if (state.selectedCommand === 'stats_others') {
+                    setCommandRoles(guildId, 'stats_others', roleIds);
                 } else {
                     setCommandRoles(guildId, state.selectedCommand, roleIds);
                 }
@@ -44,6 +50,8 @@ module.exports = {
                     setSignupRoles(guildId, []);
                 } else if (state.selectedCommand === 'signup_museum') {
                     setSignupRoles(`${guildId}:museum`, []);
+                } else if (state.selectedCommand === 'stats_others') {
+                    setCommandRoles(guildId, 'stats_others', []);
                 } else {
                     setCommandRoles(guildId, state.selectedCommand, []);
                 }
@@ -64,16 +72,23 @@ module.exports = {
                 }));
                 return newRow;
             });
-            await interaction.editReply({ components: disabled }).catch(() => {});
+            await interaction.editReply({ components: disabled }).catch(() => { });
         });
     }
 };
 
 function buildEmbed(interaction, selected = ADMIN_COMMANDS[0]) {
     const adminRoles = getAdminRoles(interaction.guildId);
-    const cmdRoles = selected.startsWith('signup_')
-        ? (selected === 'signup_raid' ? getSignupRoles(interaction.guildId) : getSignupRoles(`${interaction.guildId}:museum`))
-        : getCommandRoles(interaction.guildId, selected);
+    let cmdRoles;
+    if (selected === 'signup_raid') {
+        cmdRoles = getSignupRoles(interaction.guildId);
+    } else if (selected === 'signup_museum') {
+        cmdRoles = getSignupRoles(`${interaction.guildId}:museum`);
+    } else if (selected === 'stats_others') {
+        cmdRoles = getCommandRoles(interaction.guildId, 'stats_others');
+    } else {
+        cmdRoles = getCommandRoles(interaction.guildId, selected);
+    }
     const lines = [];
     lines.push(`Global admin roles: ${formatRoles(adminRoles) || 'none (uses Manage Server)'}`);
     if (selected !== 'global') {
@@ -81,6 +96,8 @@ function buildEmbed(interaction, selected = ADMIN_COMMANDS[0]) {
             lines.push(`Roles allowed to sign up for raids: ${formatRoles(cmdRoles) || 'none (anyone can sign up)'}`);
         } else if (selected === 'signup_museum') {
             lines.push(`Roles allowed to sign up for museums: ${formatRoles(cmdRoles) || 'none (anyone can sign up)'}`);
+        } else if (selected === 'stats_others') {
+            lines.push(`Roles allowed to view others' stats: ${formatRoles(cmdRoles) || 'none (admin/Manage Server only)'}`);
         } else {
             lines.push(`Roles for /${selected}: ${formatRoles(cmdRoles) || 'none (uses global/Manage Server)'}`);
         }

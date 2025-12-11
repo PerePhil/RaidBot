@@ -44,6 +44,12 @@ async function runReminderCheck() {
             continue;
         }
 
+        // Auto-close museum raids at start time to lock signups and record analytics
+        if (!raidData.closed && raidData.type === 'museum' && !raidData.autoCloseExecuted && secondsUntil <= 0) {
+            await autoCloseMuseum(client, raidData, messageId);
+            continue;
+        }
+
         if (raidData.closed || secondsUntil <= 0) continue;
 
         let updated = false;
@@ -170,5 +176,28 @@ async function resolveGuild(client, guildId) {
     } catch (error) {
         console.error('Failed to fetch guild for auto-closing:', error);
         return null;
+    }
+}
+
+/**
+ * Auto-close museum raids at start time to lock signups and record attendance analytics
+ */
+async function autoCloseMuseum(client, raidData, messageId) {
+    if (!raidData.guildId) return;
+    if (raidData.closed) return;
+
+    const guild = await resolveGuild(client, raidData.guildId);
+    if (!guild) return;
+
+    const message = await fetchRaidMessage(guild, raidData, messageId);
+    if (!message) return;
+
+    const signupCount = raidData.signups?.length || 0;
+    const closed = await closeRaidSignup(message, raidData, { reason: 'museum_start' });
+    if (closed) {
+        raidData.autoCloseExecuted = true;
+        await updateBotPresence();
+        markActiveRaidUpdated(messageId);
+        await sendAuditLog(guild, `Museum ${raidData.raidId || '?'} auto-locked at start time with ${signupCount} participant(s). Attendance recorded for analytics.`);
     }
 }

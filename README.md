@@ -5,12 +5,13 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 ## Features
 
 - **Raid Management** — Create and manage raids for Dragonspyre (Voracious Void), Lemuria (Ghastly Conspiracy), and Polaris (Cabal's Revenge)
-- **Museum Signups** — Separate signup system for museum runs
+- **Recurring Raids** — Schedule automatic raid creation on a weekly, daily, or custom interval with optional custom spawn times
+- **Museum Signups** — Separate signup system for museum runs with auto-lock at start time
 - **Reaction-Based Signups** — Users react with role emojis to sign up; automatic waitlist management with DM notifications
 - **Smart Reminders** — Configurable creator and participant reminders with auto-close for full raids
 - **Natural Language Time Parsing** — "tomorrow 7pm", "next Friday 6:30", or Unix timestamps
 - **Role-Based Permissions** — Per-guild admin roles and command-specific permissions
-- **Participation Stats** — Track user participation, favorite roles, and server-wide activity
+- **Unified Stats & Analytics** — Track participation, attendance rates, weekly/monthly trends, inactive members, and CSV export
 - **Availability Tracking** — Users can record their availability preferences
 - **Customizable Templates** — Enable/disable or rename raid templates per guild
 - **Rate Limiting** — Prevents spam with configurable cooldowns on reactions and commands
@@ -22,12 +23,13 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 |---------|-------------|
 | `/create` | Interactive raid/museum creation flow |
 | `/raid` | Management panel (Close, Reopen, Delete, Change Time) |
+| `/recurring` | Manage recurring raid schedules (create, list, delete, toggle, trigger) |
 | `/raidsignup` | Admin signup edits (assign, remove, side assignment) |
 | `/raidinfo` | List, view details, or export raids as .ics |
 | `/setchannel` | Configure raid/museum/audit channels |
 | `/settings` | Reminder and auto-close configuration |
 | `/templates` | Enable/disable or rename raid templates |
-| `/raidstats` | View participation statistics |
+| `/stats` | Unified stats: user, server, weekly, monthly, inactive, export |
 | `/availability` | Record/view user availability |
 | `/permissions` | Configure role-based permissions |
 | `/changelog` | View current release notes |

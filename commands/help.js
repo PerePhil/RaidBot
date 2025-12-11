@@ -40,8 +40,13 @@ module.exports = {
                     inline: false
                 },
                 {
-                    name: 'Stats',
-                    value: '`/raidstats [user] [scope:<user|server|inactive>]` — view user stats, top server, or inactive members\n`/availability [user]` — record or view availability (days/times/timezone)',
+                    name: 'Stats & Analytics',
+                    value: '`/stats user [user]` — view individual stats (attendance %, favorite roles, days)\n`/stats server` — top participants and guild totals\n`/stats weekly` / `/stats monthly` — time-based reports with trends\n`/stats inactive [role]` — members with no participation\n`/stats export` — download CSV of all data\n`/availability [user]` — record or view availability (days/times/timezone)',
+                    inline: false
+                },
+                {
+                    name: 'Recurring Raids',
+                    value: '`/recurring action:create` — set up automatic raid spawning (weekly, daily, interval)\n`/recurring action:list` — view all scheduled recurring raids\n`/recurring action:toggle id:<id>` — enable/disable a recurring schedule\n`/recurring action:trigger id:<id>` — manually spawn a raid now',
                     inline: false
                 }
             )

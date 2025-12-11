@@ -3,43 +3,48 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('changelog')
-        .setDescription('Show recent changes (Release 6)'),
+        .setDescription('Show recent changes (Release 7)'),
     async execute(interaction) {
         const embed = new EmbedBuilder()
-            .setTitle('Release 6 Changelog')
-            .setDescription('Highlights of new features, panels, and fixes.')
+            .setTitle('Release 7 Changelog')
+            .setDescription('Recurring raids, unified stats, and quality-of-life improvements.')
             .addFields(
                 {
-                    name: 'Command updates',
+                    name: '🔄 Recurring Raids',
                     value: [
-                        '• Condensed admin commands: `/raid` (manage), `/raidsignup` (assign/remove/side), `/raidinfo` (list/detail/export), `/setchannel` (interactive).',
-                        '• Added `/create` interactive flow for raid/museum creation; `/settings` panel for reminders/auto-close; `/raidstats` for participation stats.',
-                        '• Added `/changelog` (this) and `/raidinfo export` for calendar .ics downloads.'
+                        '• `/recurring action:create` — schedule automatic raid spawning (weekly, daily, or custom interval)',
+                        '• Custom spawn times — set when signups appear separately from raid start time',
+                        '• `/recurring action:trigger` — manually spawn a scheduled raid immediately',
+                        '• Copy participants option — pre-register users from previous instance'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Interactive panels',
+                    name: '📊 Unified Stats Command',
                     value: [
-                        '• Raid management buttons (Close/Reopen/Delete/Change Time) with modal time edits.',
-                        '• Channel picker and settings panels using buttons/selects; raid signup embeds show bold display names instead of pings.'
+                        '• Consolidated `/raidstats` and `/analytics` into single `/stats` command',
+                        '• `/stats user` — individual stats with attendance %, favorite roles, preferred days',
+                        '• `/stats server` — top participants and guild totals',
+                        '• `/stats weekly` / `/stats monthly` — time-based trends',
+                        '• `/stats inactive` — find members not participating',
+                        '• `/stats export` — download CSV of all data'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Scheduling & reminders',
+                    name: '🏛️ Museum Improvements',
                     value: [
-                        '• Natural-language time parsing via chrono; per-guild reminder/auto-close settings with longer durations.',
-                        '• Date + Time moved to its own field (no duplicates) and kept first in embeds; change-time now replaces the field.',
-                        '• Bug fixes: reminder flags persist, reopen/close feedback, and time updates replace the Date + Time field.'
+                        '• Museum signups auto-lock at raid start time',
+                        '• Museum participants now tracked in analytics',
+                        '• Attendance recorded for guild content monitoring'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Extras',
+                    name: '🐛 Bug Fixes',
                     value: [
-                        '• `/raidinfo export` outputs an .ics calendar of upcoming raids.',
-                        '• Participation stats recorded on close; `/raidstats` shows totals/favorites.'
+                        '• Fixed recurring raid start times when using custom spawn schedules',
+                        '• Improved recurring raid re-initialization after bot restart'
                     ].join('\n'),
                     inline: false
                 }

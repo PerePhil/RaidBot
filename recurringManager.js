@@ -425,8 +425,30 @@ async function checkAndSpawnRecurringRaids(client) {
 async function spawnRaidFromRecurring(client, recurring) {
     const stmts = getStatements();
 
-    // Calculate the actual raid time (spawn time + advance hours)
-    const raidTimestamp = recurring.nextScheduledAt + (recurring.advanceHours || 24) * 60 * 60;
+    // Calculate the actual raid time
+    // If custom spawn schedule is set, we need to calculate the raid time separately
+    let raidTimestamp;
+    const hasCustomSpawn = recurring.spawnDayOfWeek != null || recurring.spawnTimeOfDay != null;
+
+    if (hasCustomSpawn) {
+        // Calculate the next raid time based on the raid schedule (not spawn schedule)
+        const now = new Date();
+        const tz = recurring.timezone || 'America/New_York';
+
+        if (recurring.scheduleType === 'weekly') {
+            const raidTime = getNextWeeklyTime(now, recurring.dayOfWeek, recurring.timeOfDay, tz);
+            raidTimestamp = Math.floor(raidTime.getTime() / 1000);
+        } else if (recurring.scheduleType === 'daily') {
+            const raidTime = getNextDailyTime(now, recurring.timeOfDay, tz);
+            raidTimestamp = Math.floor(raidTime.getTime() / 1000);
+        } else {
+            // Fallback for interval: spawn time + interval
+            raidTimestamp = recurring.nextScheduledAt + (recurring.intervalHours || 24) * 60 * 60;
+        }
+    } else {
+        // No custom spawn - raid time is spawn time + advance hours (original behavior)
+        raidTimestamp = recurring.nextScheduledAt + (recurring.advanceHours || 0) * 60 * 60;
+    }
 
     // Get channel
     let channelId = recurring.channelId;

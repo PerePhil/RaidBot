@@ -31,5 +31,8 @@ Thumbs.db
 *.swp
 *.swo
 
+# Agent files
+agents.md
+
 # Optional: uncomment if you want to ignore lock file
 # package-lock.json

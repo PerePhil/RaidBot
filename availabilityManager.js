@@ -96,6 +96,17 @@ function getAvailability(guildId, userId) {
     };
 }
 
+function deleteAvailability(guildId, userId) {
+    const stmts = getStatements();
+    stmts.delete.run(guildId, userId);
+
+    // Remove from cache
+    const guildMap = availability.get(guildId);
+    if (guildMap) {
+        guildMap.delete(userId);
+    }
+}
+
 function usersAvailableAt(guildId, timestampSeconds) {
     // Ensure cache is populated
     if (!availability.has(guildId)) {
@@ -660,6 +671,7 @@ module.exports = {
     saveAvailability,
     setAvailability,
     getAvailability,
+    deleteAvailability,
     usersAvailableAt,
     getGuildAvailability,
     getAvailabilityHeatmap,

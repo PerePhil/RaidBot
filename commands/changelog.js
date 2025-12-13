@@ -3,45 +3,44 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('changelog')
-        .setDescription('Show recent changes (Release 8)'),
+        .setDescription('Show recent changes (Release 9)'),
     async execute(interaction) {
         const embed = new EmbedBuilder()
-            .setTitle('Release 8 Changelog')
-            .setDescription('Time slot polling, availability aggregation, and optimal time finding.')
+            .setTitle('Release 9 Changelog')
+            .setDescription('Enhanced availability system with timezone support and new features.')
             .addFields(
                 {
-                    name: '📊 Time Slot Polling',
+                    name: 'Timezone Support',
                     value: [
-                        '• `/poll create` — create a reaction-based poll with multiple time options',
-                        '• Supports 50+ voters with live vote counting',
-                        '• `/poll results` — view current voting breakdown with progress bars',
-                        '• `/poll close` — finalize poll and highlight optimal times',
-                        '• Automatically tracks reactions for seamless voting'
+                        '• Times now display in your local timezone (not UTC)',
+                        '• Set your timezone in `/availability set` (EST, PST, UTC-5, etc.)',
+                        '• Viewer-centric display — times convert to your timezone automatically'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '📅 Availability Enhancements',
+                    name: 'New Availability Commands',
                     value: [
-                        '• `/availability set` — improved modal with better placeholders',
-                        '• `/availability summary` — server-wide heatmap showing when users are free',
-                        '• `/availability optimal` — find time slots with the most available users',
-                        '• Aggregates data from all members to suggest best raid times'
+                        '• `/availability check <time>` — see who\'s available at a specific time',
+                        '• `/availability post-button` — post a persistent button for new members',
+                        '• `/availability clear` — remove your availability data',
+                        '• Admins can now set/clear availability for other users'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '🔥 Heatmap Visualization',
+                    name: 'Quality of Life',
                     value: [
-                        '• Text-based heatmap shows hottest time slots at a glance',
-                        '• Ranked list of optimal times with user counts',
-                        '• Filter by minimum users required'
+                        '• Confirmation now shows parsed time windows',
+                        '• Onboarding embed explains acceptable formats',
+                        '• Availability data included in `/stats export` CSV',
+                        '• Cleaner embeds (emojis removed)'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '🔄 Previous (Release 7)',
-                    value: 'Recurring raids, unified `/stats` command, museum improvements',
+                    name: 'Previous (Release 8)',
+                    value: 'Time slot polling, availability heatmaps, optimal time finding',
                     inline: false
                 }
             );

@@ -46,7 +46,7 @@ module.exports = {
                 },
                 {
                     name: 'Availability & Polling',
-                    value: '`/availability set` — record your availability (days/times/timezone)\n`/availability view [user]` — view someone\'s availability\n`/availability summary` — server-wide heatmap of when users are free\n`/availability optimal [min_users]` — find best times with X+ people available\n`/availability post-button` — post a persistent "Set Availability" button in a channel (Admin)\n`/poll create` — create a time slot poll for finding best raid times\n`/poll results` / `/poll close` — view or finalize poll results',
+                    value: '`/availability set [user]` — set availability (Admin can set for others)\n`/availability view [user]` — view someone\'s availability\n`/availability summary` — server heatmap of when users are free\n`/availability optimal [min_users]` — find times with X+ available\n`/availability check <time>` — see who is available at a specific time\n`/availability clear [user]` — remove availability data\n`/availability post-button` — post onboarding button (Admin)\n`/poll create` — create a time slot poll\n`/poll results` / `/poll close` — view or finalize poll',
                     inline: false
                 },
                 {

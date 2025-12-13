@@ -84,7 +84,7 @@ client.on('interactionCreate', async (interaction) => {
             try {
                 // Import the components we need for the modal
                 const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
-                const { setAvailability } = require('./availabilityManager');
+                const { setAvailability, getAvailability, parseTimezone } = require('./availabilityManager');
 
                 const modal = new ModalBuilder()
                     .setCustomId('availability:set')
@@ -140,7 +140,40 @@ client.on('interactionCreate', async (interaction) => {
                     notes: submission.fields.getTextInputValue('notes').trim()
                 };
                 setAvailability(interaction.guildId, interaction.user.id, data);
-                return submission.reply({ content: 'Availability saved.', flags: MessageFlags.Ephemeral });
+
+                // Get the saved data to show parsed windows
+                const saved = getAvailability(interaction.guildId, interaction.user.id);
+                let response = 'Availability saved.';
+
+                if (saved?.windows && saved.windows.length > 0) {
+                    const tzLabel = saved.timezone || 'UTC';
+                    const viewerOffset = parseTimezone(saved.timezone);
+                    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const formatMins = (mins) => {
+                        const h = Math.floor(mins / 60);
+                        const m = mins % 60;
+                        const period = h >= 12 ? 'PM' : 'AM';
+                        const displayH = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                        return `${displayH}:${m.toString().padStart(2, '0')} ${period}`;
+                    };
+                    const convertToLocal = (utcMins, offset) => {
+                        if (offset === null || offset === undefined) return utcMins;
+                        return (utcMins + offset + 24 * 60) % (24 * 60);
+                    };
+                    const windowStr = saved.windows.slice(0, 5).map(w => {
+                        const localStart = convertToLocal(w.start, viewerOffset);
+                        const localEnd = convertToLocal(w.end, viewerOffset);
+                        return `• ${days[w.day]} ${formatMins(localStart)}-${formatMins(localEnd)}`;
+                    }).join('\n');
+                    response += `\n\n**Parsed time windows (${tzLabel}):**\n${windowStr}`;
+                    if (saved.windows.length > 5) {
+                        response += `\n_(+${saved.windows.length - 5} more)_`;
+                    }
+                } else if (data.days) {
+                    response += '\n\n_Could not parse time windows from your input. Use formats like "Mon-Fri 7-10pm" or "Weekends evenings"._';
+                }
+
+                return submission.reply({ content: response, flags: MessageFlags.Ephemeral });
             } catch (error) {
                 console.error('Error handling availability button:', error);
                 if (!interaction.replied && !interaction.deferred) {

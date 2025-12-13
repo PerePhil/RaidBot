@@ -257,12 +257,35 @@ function exportToCSV(guildId) {
     ensureGuildAnalytics(guildId);
     const guild = analyticsData.guilds[guildId];
 
-    const headers = ['User ID', 'Total Signups', 'Attended', 'No Shows', 'Attendance Rate', 'Last Active'];
+    // Import availability data
+    let getGuildAvailability;
+    try {
+        getGuildAvailability = require('../availabilityManager').getGuildAvailability;
+    } catch {
+        getGuildAvailability = null;
+    }
+
+    const availabilityMap = new Map();
+    if (getGuildAvailability) {
+        const allAvailability = getGuildAvailability(guildId);
+        allAvailability.forEach(entry => {
+            availabilityMap.set(entry.userId, entry);
+        });
+    }
+
+    const headers = ['User ID', 'Total Signups', 'Attended', 'No Shows', 'Attendance Rate', 'Last Active', 'Timezone', 'Preferred Days', 'Preferred Roles'];
     const rows = Object.entries(guild.userStats)
         .map(([userId, stats]) => {
             const rate = stats.signups > 0 ? (stats.attended / stats.signups * 100).toFixed(1) : '100.0';
             const lastActive = stats.lastActive ? new Date(stats.lastActive).toISOString().split('T')[0] : 'Never';
-            return `${userId},${stats.signups},${stats.attended},${stats.noShows},${rate}%,${lastActive}`;
+
+            // Get availability data for this user
+            const avail = availabilityMap.get(userId) || {};
+            const timezone = (avail.timezone || '').replace(/,/g, ';');
+            const days = (avail.days || '').replace(/,/g, ';');
+            const roles = (avail.roles || '').replace(/,/g, ';');
+
+            return `${userId},${stats.signups},${stats.attended},${stats.noShows},${rate}%,${lastActive},"${timezone}","${days}","${roles}"`;
         });
 
     return [headers.join(','), ...rows].join('\n');

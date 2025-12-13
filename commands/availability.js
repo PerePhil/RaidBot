@@ -2,10 +2,12 @@ const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, Act
 const {
     setAvailability,
     getAvailability,
+    deleteAvailability,
     getGuildAvailability,
     getAvailabilityHeatmap,
     findOptimalTimes,
-    parseTimezone
+    parseTimezone,
+    usersAvailableAt
 } = require('../availabilityManager');
 
 module.exports = {
@@ -14,7 +16,11 @@ module.exports = {
         .setDescription('Record your availability or view server-wide availability data')
         .addSubcommand((sub) =>
             sub.setName('set')
-                .setDescription('Set your availability (opens a form)'))
+                .setDescription('Set your availability (opens a form)')
+                .addUserOption((opt) =>
+                    opt.setName('user')
+                        .setDescription('User to set availability for (Admin only, defaults to you)')
+                        .setRequired(false)))
         .addSubcommand((sub) =>
             sub.setName('view')
                 .setDescription('View availability for a user')
@@ -35,6 +41,20 @@ module.exports = {
                         .setMaxValue(100)
                         .setRequired(false)))
         .addSubcommand((sub) =>
+            sub.setName('check')
+                .setDescription('Check who is available at a specific time')
+                .addStringOption((opt) =>
+                    opt.setName('time')
+                        .setDescription('Time to check (e.g., "Saturday 7pm", "tomorrow 8pm", or a timestamp)')
+                        .setRequired(true)))
+        .addSubcommand((sub) =>
+            sub.setName('clear')
+                .setDescription('Clear your availability data')
+                .addUserOption((opt) =>
+                    opt.setName('user')
+                        .setDescription('User to clear availability for (Admin only)')
+                        .setRequired(false)))
+        .addSubcommand((sub) =>
             sub.setName('post-button')
                 .setDescription('Post a persistent "Set Availability" button in this channel (Admin only)')),
 
@@ -50,6 +70,10 @@ module.exports = {
                 return handleSummary(interaction);
             case 'optimal':
                 return handleOptimal(interaction);
+            case 'check':
+                return handleCheck(interaction);
+            case 'clear':
+                return handleClear(interaction);
             case 'post-button':
                 return handlePostButton(interaction);
             default:
@@ -59,9 +83,23 @@ module.exports = {
 };
 
 async function handleSet(interaction) {
+    const targetUser = interaction.options.getUser('user');
+    const isSettingForOther = targetUser && targetUser.id !== interaction.user.id;
+
+    // Check admin permission if setting for another user
+    if (isSettingForOther && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+            content: 'You need the "Manage Server" permission to set availability for other users.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const targetId = targetUser?.id || interaction.user.id;
+    const targetName = targetUser?.username || interaction.user.username;
+
     const modal = new ModalBuilder()
         .setCustomId('availability:set')
-        .setTitle('Set your availability')
+        .setTitle(isSettingForOther ? `Set availability for ${targetName}` : 'Set your availability')
         .addComponents(
             new ActionRowBuilder().addComponents(
                 new TextInputBuilder()
@@ -111,8 +149,36 @@ async function handleSet(interaction) {
         roles: submission.fields.getTextInputValue('roles').trim(),
         notes: submission.fields.getTextInputValue('notes').trim()
     };
-    setAvailability(interaction.guildId, interaction.user.id, data);
-    return submission.reply({ content: 'Availability saved.', flags: MessageFlags.Ephemeral });
+    setAvailability(interaction.guildId, targetId, data);
+
+    // Get the saved data to show parsed windows
+    const saved = getAvailability(interaction.guildId, targetId);
+
+    // Build confirmation message with parsed windows
+    let response = isSettingForOther
+        ? `Availability saved for ${targetName}.`
+        : 'Availability saved.';
+
+    if (saved?.windows && saved.windows.length > 0) {
+        const tzLabel = saved.timezone || 'UTC';
+        const viewerOffset = parseTimezone(saved.timezone);
+        const windowStr = saved.windows
+            .slice(0, 5)
+            .map(w => {
+                const localStart = convertUtcToLocal(w.start, viewerOffset);
+                const localEnd = convertUtcToLocal(w.end, viewerOffset);
+                return `• ${getDayName(w.day)} ${formatMinutes(localStart)}-${formatMinutes(localEnd)}`;
+            })
+            .join('\n');
+        response += `\n\n**Parsed time windows (${tzLabel}):**\n${windowStr}`;
+        if (saved.windows.length > 5) {
+            response += `\n_(+${saved.windows.length - 5} more)_`;
+        }
+    } else if (data.days) {
+        response += '\n\n_Could not parse time windows from your input. Use formats like "Mon-Fri 7-10pm" or "Weekends evenings"._';
+    }
+
+    return submission.reply({ content: response, flags: MessageFlags.Ephemeral });
 }
 
 async function handleView(interaction) {
@@ -270,6 +336,115 @@ async function handleOptimal(interaction) {
     embed.setFooter({ text: `Based on ${entries.length} member availability records` });
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+async function handleCheck(interaction) {
+    const timeInput = interaction.options.getString('time');
+    const chrono = require('chrono-node');
+
+    // Parse the time input
+    let timestamp;
+
+    // Check if it's a Unix timestamp
+    if (/^\d{10,13}$/.test(timeInput)) {
+        timestamp = timeInput.length === 13
+            ? Math.floor(parseInt(timeInput) / 1000)
+            : parseInt(timeInput);
+    } else {
+        // Use chrono to parse natural language
+        const parsed = chrono.parseDate(timeInput, new Date(), { forwardDate: true });
+        if (!parsed) {
+            return interaction.reply({
+                content: `Could not parse "${timeInput}" as a time. Try formats like "Saturday 7pm", "tomorrow 8pm", or a Unix timestamp.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+        timestamp = Math.floor(parsed.getTime() / 1000);
+    }
+
+    // Get users available at this time
+    const availableUserIds = usersAvailableAt(interaction.guildId, timestamp);
+
+    // Format the time for display
+    const dateObj = new Date(timestamp * 1000);
+    const timeStr = dateObj.toLocaleString('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short'
+    });
+
+    const embed = new EmbedBuilder()
+        .setTitle('Availability Check')
+        .setColor(availableUserIds.length > 0 ? 0x2ecc71 : 0xe74c3c);
+
+    if (availableUserIds.length === 0) {
+        embed.setDescription(`**Time:** ${timeStr}\n\nNo members have recorded availability for this time.`);
+    } else {
+        // Fetch member info for display
+        const memberMentions = [];
+        for (const userId of availableUserIds.slice(0, 25)) { // Limit to 25 to avoid embed limits
+            try {
+                const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                if (member) {
+                    memberMentions.push(`<@${userId}>`);
+                }
+            } catch {
+                memberMentions.push(`<@${userId}>`);
+            }
+        }
+
+        const moreCount = availableUserIds.length > 25 ? ` (+${availableUserIds.length - 25} more)` : '';
+
+        embed.setDescription(
+            `**Time:** ${timeStr}\n\n` +
+            `**${availableUserIds.length} member${availableUserIds.length === 1 ? '' : 's'} available:**\n` +
+            memberMentions.join(', ') + moreCount
+        );
+    }
+
+    embed.setFooter({ text: 'Based on recorded availability windows' });
+
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+async function handleClear(interaction) {
+    const targetUser = interaction.options.getUser('user');
+    const isClearingOther = targetUser && targetUser.id !== interaction.user.id;
+
+    // Check admin permission if clearing for another user
+    if (isClearingOther && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+            content: 'You need the "Manage Server" permission to clear availability for other users.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const targetId = targetUser?.id || interaction.user.id;
+    const targetName = targetUser?.username || interaction.user.username;
+
+    // Check if they have availability data
+    const existing = getAvailability(interaction.guildId, targetId);
+    if (!existing) {
+        return interaction.reply({
+            content: isClearingOther
+                ? `${targetName} has no availability data to clear.`
+                : 'You have no availability data to clear.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Delete the availability
+    deleteAvailability(interaction.guildId, targetId);
+
+    return interaction.reply({
+        content: isClearingOther
+            ? `Cleared availability data for ${targetName}.`
+            : 'Your availability data has been cleared.',
+        flags: MessageFlags.Ephemeral
+    });
 }
 
 async function handlePostButton(interaction) {

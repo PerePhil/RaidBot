@@ -41,7 +41,12 @@ module.exports = {
                 },
                 {
                     name: 'Stats & Analytics',
-                    value: '`/stats user [user]` — view individual stats (attendance %, favorite roles, days)\n`/stats server` — top participants and guild totals\n`/stats weekly` / `/stats monthly` — time-based reports with trends\n`/stats inactive [role]` — members with no participation\n`/stats export` — download CSV of all data\n`/availability [user]` — record or view availability (days/times/timezone)',
+                    value: '`/stats user [user]` — view individual stats (attendance %, favorite roles, days)\n`/stats server` — top participants and guild totals\n`/stats weekly` / `/stats monthly` — time-based reports with trends\n`/stats inactive [role]` — members with no participation\n`/stats export` — download CSV of all data',
+                    inline: false
+                },
+                {
+                    name: 'Availability & Polling',
+                    value: '`/availability set` — record your availability (days/times/timezone)\n`/availability view [user]` — view someone\'s availability\n`/availability summary` — server-wide heatmap of when users are free\n`/availability optimal [min_users]` — find best times with X+ people available\n`/availability post-button` — post a persistent "Set Availability" button in a channel (Admin)\n`/poll create` — create a time slot poll for finding best raid times\n`/poll results` / `/poll close` — view or finalize poll results',
                     inline: false
                 },
                 {

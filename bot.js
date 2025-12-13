@@ -21,6 +21,7 @@ const { startReminderScheduler } = require('./reminderScheduler');
 const { loadTemplateOverrides } = require('./templatesManager');
 const { loadAuditChannels } = require('./auditLog');
 const { loadAvailability } = require('./availabilityManager');
+const { loadPolls, getPollByMessage, recordVote, removeVote, getIndexFromEmoji } = require('./pollManager');
 const { loadAnalytics } = require('./utils/analytics');
 const { logger } = require('./utils/logger');
 const { close: closeDatabase } = require('./db/database');
@@ -59,6 +60,7 @@ client.once('clientReady', async () => {
     loadSignupRoles();
     loadAnalytics();
     loadRecurringRaids();
+    loadPolls();
 
     try {
         await enforceGuildAllowlist();
@@ -75,6 +77,83 @@ const { commandCooldowns } = require('./utils/rateLimiter');
 const { formatError, getErrorMessage } = require('./utils/errorMessages');
 
 client.on('interactionCreate', async (interaction) => {
+    // Handle button interactions for availability
+    if (interaction.isButton() && interaction.customId === 'availability:set:button') {
+        const availabilityCommand = commandMap.get('availability');
+        if (availabilityCommand) {
+            try {
+                // Import the components we need for the modal
+                const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
+                const { setAvailability } = require('./availabilityManager');
+
+                const modal = new ModalBuilder()
+                    .setCustomId('availability:set')
+                    .setTitle('Set your availability')
+                    .addComponents(
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('timezone')
+                                .setLabel('Timezone')
+                                .setStyle(TextInputStyle.Short)
+                                .setPlaceholder('EST, PST, UTC-5, GMT+1, etc.')
+                                .setRequired(false)
+                        ),
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('days')
+                                .setLabel('Preferred days/times')
+                                .setStyle(TextInputStyle.Short)
+                                .setPlaceholder('Mon-Fri 7-10pm, Weekends 12-6pm')
+                                .setRequired(false)
+                        ),
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('roles')
+                                .setLabel('Preferred roles')
+                                .setStyle(TextInputStyle.Short)
+                                .setPlaceholder('Vanguard, Support, Surge, Gates, Flex')
+                                .setRequired(false)
+                        ),
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('notes')
+                                .setLabel('Notes')
+                                .setStyle(TextInputStyle.Paragraph)
+                                .setPlaceholder('Any other scheduling notes or constraints?')
+                                .setRequired(false)
+                        )
+                    );
+
+                await interaction.showModal(modal);
+
+                const submission = await interaction.awaitModalSubmit({
+                    time: 120 * 1000,
+                    filter: (i) => i.customId === 'availability:set' && i.user.id === interaction.user.id
+                }).catch(() => null);
+
+                if (!submission) return;
+
+                const data = {
+                    timezone: submission.fields.getTextInputValue('timezone').trim(),
+                    days: submission.fields.getTextInputValue('days').trim(),
+                    roles: submission.fields.getTextInputValue('roles').trim(),
+                    notes: submission.fields.getTextInputValue('notes').trim()
+                };
+                setAvailability(interaction.guildId, interaction.user.id, data);
+                return submission.reply({ content: 'Availability saved.', flags: MessageFlags.Ephemeral });
+            } catch (error) {
+                console.error('Error handling availability button:', error);
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: 'An error occurred while setting your availability.',
+                        ephemeral: true
+                    }).catch(() => { });
+                }
+            }
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.guildId && !isGuildAllowed(interaction.guildId)) {
@@ -133,8 +212,35 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-client.on('messageReactionAdd', handleReactionAdd);
-client.on('messageReactionRemove', handleReactionRemove);
+client.on('messageReactionAdd', async (reaction, user) => {
+    // Handle poll votes
+    if (!user.bot) {
+        const poll = getPollByMessage(reaction.message.id);
+        if (poll && !poll.closed) {
+            const optionIndex = getIndexFromEmoji(reaction.emoji.name);
+            if (optionIndex >= 0 && optionIndex < poll.options.length) {
+                recordVote(poll.id, user.id, optionIndex);
+            }
+        }
+    }
+    // Handle raid reactions
+    handleReactionAdd(reaction, user);
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+    // Handle poll vote removal
+    if (!user.bot) {
+        const poll = getPollByMessage(reaction.message.id);
+        if (poll && !poll.closed) {
+            const optionIndex = getIndexFromEmoji(reaction.emoji.name);
+            if (optionIndex >= 0 && optionIndex < poll.options.length) {
+                removeVote(poll.id, user.id, optionIndex);
+            }
+        }
+    }
+    // Handle raid reaction removals
+    handleReactionRemove(reaction, user);
+});
 
 client.on('guildCreate', async (guild) => {
     if (isGuildAllowed(guild.id)) {

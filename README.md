@@ -12,7 +12,8 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 - **Natural Language Time Parsing** — "tomorrow 7pm", "next Friday 6:30", or Unix timestamps
 - **Role-Based Permissions** — Per-guild admin roles and command-specific permissions
 - **Unified Stats & Analytics** — Track participation, attendance rates, weekly/monthly trends, inactive members, and CSV export
-- **Availability Tracking** — Users can record their availability preferences
+- **Availability Tracking** — Users record availability; server-wide heatmap and optimal time finder aggregate 50+ users
+- **Time Slot Polling** — Reaction-based polls to find optimal raid times with live vote tracking
 - **Customizable Templates** — Enable/disable or rename raid templates per guild
 - **Rate Limiting** — Prevents spam with configurable cooldowns on reactions and commands
 - **Graceful Shutdown** — Safe shutdown with state preservation
@@ -30,7 +31,8 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 | `/settings` | Reminder and auto-close configuration |
 | `/templates` | Enable/disable or rename raid templates |
 | `/stats` | Unified stats: user, server, weekly, monthly, inactive, export |
-| `/availability` | Record/view user availability |
+| `/availability` | Record/view availability; server summary and optimal time finder |
+| `/poll` | Create time slot polls to find best raid times (50+ voter support) |
 | `/permissions` | Configure role-based permissions |
 | `/changelog` | View current release notes |
 | `/help` | Command documentation |

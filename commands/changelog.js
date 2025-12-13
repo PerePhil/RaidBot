@@ -3,49 +3,45 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('changelog')
-        .setDescription('Show recent changes (Release 7)'),
+        .setDescription('Show recent changes (Release 8)'),
     async execute(interaction) {
         const embed = new EmbedBuilder()
-            .setTitle('Release 7 Changelog')
-            .setDescription('Recurring raids, unified stats, and quality-of-life improvements.')
+            .setTitle('Release 8 Changelog')
+            .setDescription('Time slot polling, availability aggregation, and optimal time finding.')
             .addFields(
                 {
-                    name: '🔄 Recurring Raids',
+                    name: '📊 Time Slot Polling',
                     value: [
-                        '• `/recurring action:create` — schedule automatic raid spawning (weekly, daily, or custom interval)',
-                        '• Custom spawn times — set when signups appear separately from raid start time',
-                        '• `/recurring action:trigger` — manually spawn a scheduled raid immediately',
-                        '• Copy participants option — pre-register users from previous instance'
+                        '• `/poll create` — create a reaction-based poll with multiple time options',
+                        '• Supports 50+ voters with live vote counting',
+                        '• `/poll results` — view current voting breakdown with progress bars',
+                        '• `/poll close` — finalize poll and highlight optimal times',
+                        '• Automatically tracks reactions for seamless voting'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '📊 Unified Stats Command',
+                    name: '📅 Availability Enhancements',
                     value: [
-                        '• Consolidated `/raidstats` and `/analytics` into single `/stats` command',
-                        '• `/stats user` — individual stats with attendance %, favorite roles, preferred days',
-                        '• `/stats server` — top participants and guild totals',
-                        '• `/stats weekly` / `/stats monthly` — time-based trends',
-                        '• `/stats inactive` — find members not participating',
-                        '• `/stats export` — download CSV of all data'
+                        '• `/availability set` — improved modal with better placeholders',
+                        '• `/availability summary` — server-wide heatmap showing when users are free',
+                        '• `/availability optimal` — find time slots with the most available users',
+                        '• Aggregates data from all members to suggest best raid times'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '🏛️ Museum Improvements',
+                    name: '🔥 Heatmap Visualization',
                     value: [
-                        '• Museum signups auto-lock at raid start time',
-                        '• Museum participants now tracked in analytics',
-                        '• Attendance recorded for guild content monitoring'
+                        '• Text-based heatmap shows hottest time slots at a glance',
+                        '• Ranked list of optimal times with user counts',
+                        '• Filter by minimum users required'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '🐛 Bug Fixes',
-                    value: [
-                        '• Fixed recurring raid start times when using custom spawn schedules',
-                        '• Improved recurring raid re-initialization after bot restart'
-                    ].join('\n'),
+                    name: '🔄 Previous (Release 7)',
+                    value: 'Recurring raids, unified `/stats` command, museum improvements',
                     inline: false
                 }
             );

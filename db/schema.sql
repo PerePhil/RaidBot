@@ -186,7 +186,33 @@ CREATE TABLE IF NOT EXISTS recurring_raids (
   created_at INTEGER DEFAULT (unixepoch())
 );
 
+-- Time slot polls
+CREATE TABLE IF NOT EXISTS polls (
+  id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  message_id TEXT,
+  creator_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  options TEXT NOT NULL,       -- JSON array of time slot strings
+  expires_at INTEGER,
+  closed INTEGER DEFAULT 0,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
+-- Poll votes
+CREATE TABLE IF NOT EXISTS poll_votes (
+  poll_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  option_index INTEGER NOT NULL,
+  voted_at INTEGER DEFAULT (unixepoch()),
+  PRIMARY KEY (poll_id, user_id, option_index),
+  FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
+);
+
 -- Indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_polls_guild ON polls(guild_id);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
 CREATE INDEX IF NOT EXISTS idx_raids_guild ON raids(guild_id);
 CREATE INDEX IF NOT EXISTS idx_raids_timestamp ON raids(timestamp);
 CREATE INDEX IF NOT EXISTS idx_raids_channel ON raids(channel_id);

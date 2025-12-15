@@ -79,109 +79,108 @@ const { formatError, getErrorMessage } = require('./utils/errorMessages');
 client.on('interactionCreate', async (interaction) => {
     // Handle button interactions for availability
     if (interaction.isButton() && interaction.customId === 'availability:set:button') {
-        const availabilityCommand = commandMap.get('availability');
-        if (availabilityCommand) {
-            try {
-                // Import the components we need for the modal
-                const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
-                const { setAvailability, getAvailability, parseTimezone } = require('./availabilityManager');
+        try {
+            const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
-                const modal = new ModalBuilder()
-                    .setCustomId('availability:set')
-                    .setTitle('Set your availability')
-                    .addComponents(
-                        new ActionRowBuilder().addComponents(
-                            new TextInputBuilder()
-                                .setCustomId('timezone')
-                                .setLabel('Timezone')
-                                .setStyle(TextInputStyle.Short)
-                                .setPlaceholder('EST, PST, UTC-5, GMT+1, etc.')
-                                .setRequired(false)
-                        ),
-                        new ActionRowBuilder().addComponents(
-                            new TextInputBuilder()
-                                .setCustomId('days')
-                                .setLabel('Preferred days/times')
-                                .setStyle(TextInputStyle.Short)
-                                .setPlaceholder('Mon-Fri 7-10pm, Weekends 12-6pm')
-                                .setRequired(false)
-                        ),
-                        new ActionRowBuilder().addComponents(
-                            new TextInputBuilder()
-                                .setCustomId('roles')
-                                .setLabel('Preferred roles')
-                                .setStyle(TextInputStyle.Short)
-                                .setPlaceholder('Vanguard, Support, Surge, Gates, Flex')
-                                .setRequired(false)
-                        ),
-                        new ActionRowBuilder().addComponents(
-                            new TextInputBuilder()
-                                .setCustomId('notes')
-                                .setLabel('Notes')
-                                .setStyle(TextInputStyle.Paragraph)
-                                .setPlaceholder('Any other scheduling notes or constraints?')
-                                .setRequired(false)
-                        )
-                    );
+            const modal = new ModalBuilder()
+                .setCustomId('availability:set:button:modal')
+                .setTitle('Set your availability')
+                .addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('timezone')
+                            .setLabel('Timezone')
+                            .setStyle(TextInputStyle.Short)
+                            .setPlaceholder('EST, PST, UTC-5, GMT+1, etc.')
+                            .setRequired(false)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('days')
+                            .setLabel('Preferred days/times')
+                            .setStyle(TextInputStyle.Short)
+                            .setPlaceholder('Mon-Fri 7-10pm, Weekends 12-6pm')
+                            .setRequired(false)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('roles')
+                            .setLabel('Preferred roles')
+                            .setStyle(TextInputStyle.Short)
+                            .setPlaceholder('Vanguard, Support, Surge, Gates, Flex')
+                            .setRequired(false)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('notes')
+                            .setLabel('Notes')
+                            .setStyle(TextInputStyle.Paragraph)
+                            .setPlaceholder('Any other scheduling notes or constraints?')
+                            .setRequired(false)
+                    )
+                );
 
-                await interaction.showModal(modal);
+            await interaction.showModal(modal);
+        } catch (error) {
+            console.error('Error showing availability modal:', error);
+        }
+        return;
+    }
 
-                const submission = await interaction.awaitModalSubmit({
-                    time: 120 * 1000,
-                    filter: (i) => i.customId === 'availability:set' && i.user.id === interaction.user.id
-                }).catch(() => null);
+    // Handle modal submit from the persistent button
+    if (interaction.isModalSubmit() && interaction.customId === 'availability:set:button:modal') {
+        try {
+            const { MessageFlags } = require('discord.js');
+            const { setAvailability, getAvailability, parseTimezone } = require('./availabilityManager');
 
-                if (!submission) return;
+            const data = {
+                timezone: interaction.fields.getTextInputValue('timezone').trim(),
+                days: interaction.fields.getTextInputValue('days').trim(),
+                roles: interaction.fields.getTextInputValue('roles').trim(),
+                notes: interaction.fields.getTextInputValue('notes').trim()
+            };
+            setAvailability(interaction.guildId, interaction.user.id, data);
 
-                const data = {
-                    timezone: submission.fields.getTextInputValue('timezone').trim(),
-                    days: submission.fields.getTextInputValue('days').trim(),
-                    roles: submission.fields.getTextInputValue('roles').trim(),
-                    notes: submission.fields.getTextInputValue('notes').trim()
+            // Get the saved data to show parsed windows
+            const saved = getAvailability(interaction.guildId, interaction.user.id);
+            let response = 'Availability saved.';
+
+            if (saved?.windows && saved.windows.length > 0) {
+                const tzLabel = saved.timezone || 'UTC';
+                const viewerOffset = parseTimezone(saved.timezone);
+                const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const formatMins = (mins) => {
+                    const h = Math.floor(mins / 60);
+                    const m = mins % 60;
+                    const period = h >= 12 ? 'PM' : 'AM';
+                    const displayH = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                    return `${displayH}:${m.toString().padStart(2, '0')} ${period}`;
                 };
-                setAvailability(interaction.guildId, interaction.user.id, data);
-
-                // Get the saved data to show parsed windows
-                const saved = getAvailability(interaction.guildId, interaction.user.id);
-                let response = 'Availability saved.';
-
-                if (saved?.windows && saved.windows.length > 0) {
-                    const tzLabel = saved.timezone || 'UTC';
-                    const viewerOffset = parseTimezone(saved.timezone);
-                    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                    const formatMins = (mins) => {
-                        const h = Math.floor(mins / 60);
-                        const m = mins % 60;
-                        const period = h >= 12 ? 'PM' : 'AM';
-                        const displayH = h === 0 ? 12 : h > 12 ? h - 12 : h;
-                        return `${displayH}:${m.toString().padStart(2, '0')} ${period}`;
-                    };
-                    const convertToLocal = (utcMins, offset) => {
-                        if (offset === null || offset === undefined) return utcMins;
-                        return (utcMins + offset + 24 * 60) % (24 * 60);
-                    };
-                    const windowStr = saved.windows.slice(0, 5).map(w => {
-                        const localStart = convertToLocal(w.start, viewerOffset);
-                        const localEnd = convertToLocal(w.end, viewerOffset);
-                        return `• ${days[w.day]} ${formatMins(localStart)}-${formatMins(localEnd)}`;
-                    }).join('\n');
-                    response += `\n\n**Parsed time windows (${tzLabel}):**\n${windowStr}`;
-                    if (saved.windows.length > 5) {
-                        response += `\n_(+${saved.windows.length - 5} more)_`;
-                    }
-                } else if (data.days) {
-                    response += '\n\n_Could not parse time windows from your input. Use formats like "Mon-Fri 7-10pm" or "Weekends evenings"._';
+                const convertToLocal = (utcMins, offset) => {
+                    if (offset === null || offset === undefined) return utcMins;
+                    return (utcMins + offset + 24 * 60) % (24 * 60);
+                };
+                const windowStr = saved.windows.slice(0, 5).map(w => {
+                    const localStart = convertToLocal(w.start, viewerOffset);
+                    const localEnd = convertToLocal(w.end, viewerOffset);
+                    return `• ${days[w.day]} ${formatMins(localStart)}-${formatMins(localEnd)}`;
+                }).join('\n');
+                response += `\n\n**Parsed time windows (${tzLabel}):**\n${windowStr}`;
+                if (saved.windows.length > 5) {
+                    response += `\n_(+${saved.windows.length - 5} more)_`;
                 }
+            } else if (data.days) {
+                response += '\n\n_Could not parse time windows from your input. Use formats like "Mon-Fri 7-10pm" or "Weekends evenings"._';
+            }
 
-                return submission.reply({ content: response, flags: MessageFlags.Ephemeral });
-            } catch (error) {
-                console.error('Error handling availability button:', error);
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: 'An error occurred while setting your availability.',
-                        ephemeral: true
-                    }).catch(() => { });
-                }
+            return interaction.reply({ content: response, flags: MessageFlags.Ephemeral });
+        } catch (error) {
+            console.error('Error handling availability modal submit:', error);
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({
+                    content: 'An error occurred while saving your availability.',
+                    ephemeral: true
+                }).catch(() => { });
             }
         }
         return;

@@ -3,44 +3,33 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('changelog')
-        .setDescription('Show recent changes (Release 9)'),
+        .setDescription('Show recent changes (Release 10)'),
     async execute(interaction) {
         const embed = new EmbedBuilder()
-            .setTitle('Release 9 Changelog')
-            .setDescription('Enhanced availability system with timezone support and new features.')
+            .setTitle('Release 10 Changelog')
+            .setDescription('Availability management improvements and admin tools.')
             .addFields(
                 {
-                    name: 'Timezone Support',
+                    name: 'Availability List',
                     value: [
-                        '• Times now display in your local timezone (not UTC)',
-                        '• Set your timezone in `/availability set` (EST, PST, UTC-5, etc.)',
-                        '• Viewer-centric display — times convert to your timezone automatically'
+                        '• `/availability list` — view all members who have set availability',
+                        '• Shows timezone and days input at a glance',
+                        '• Parse failures flagged with ⚠️ and sorted to the top'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'New Availability Commands',
+                    name: 'Parse Failure Notifications',
                     value: [
-                        '• `/availability check <time>` — see who\'s available at a specific time',
-                        '• `/availability post-button` — post a persistent button for new members',
-                        '• `/availability clear` — remove your availability data',
-                        '• Admins can now set/clear availability for other users'
+                        '• Admins notified via audit log when time parsing fails',
+                        '• Users see a warning if their input could not be parsed',
+                        '• Easy to fix with `/availability set user:@user`'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Quality of Life',
-                    value: [
-                        '• Confirmation now shows parsed time windows',
-                        '• Onboarding embed explains acceptable formats',
-                        '• Availability data included in `/stats export` CSV',
-                        '• Cleaner embeds (emojis removed)'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: 'Previous (Release 8)',
-                    value: 'Time slot polling, availability heatmaps, optimal time finding',
+                    name: 'Previous (Release 9)',
+                    value: 'Timezone support, check/clear commands, post-button for onboarding',
                     inline: false
                 }
             );

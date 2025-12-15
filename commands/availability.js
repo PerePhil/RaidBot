@@ -9,6 +9,7 @@ const {
     parseTimezone,
     usersAvailableAt
 } = require('../availabilityManager');
+const { sendAuditLog } = require('../auditLog');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -56,7 +57,10 @@ module.exports = {
                         .setRequired(false)))
         .addSubcommand((sub) =>
             sub.setName('post-button')
-                .setDescription('Post a persistent "Set Availability" button in this channel (Admin only)')),
+                .setDescription('Post a persistent "Set Availability" button in this channel (Admin only)'))
+        .addSubcommand((sub) =>
+            sub.setName('list')
+                .setDescription('View all members who have set their availability')),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -76,6 +80,8 @@ module.exports = {
                 return handleClear(interaction);
             case 'post-button':
                 return handlePostButton(interaction);
+            case 'list':
+                return handleList(interaction);
             default:
                 return interaction.reply({ content: 'Unknown subcommand.', flags: MessageFlags.Ephemeral });
         }
@@ -176,6 +182,25 @@ async function handleSet(interaction) {
         }
     } else if (data.days) {
         response += '\n\n_Could not parse time windows from your input. Use formats like "Mon-Fri 7-10pm" or "Weekends evenings"._';
+
+        // Notify admins via audit log about parse failure
+        try {
+            const guild = interaction.guild;
+            if (guild) {
+                sendAuditLog(guild, null, {
+                    title: 'Availability Parse Failure',
+                    color: 0xf39c12,
+                    fields: [
+                        { name: 'User', value: `<@${targetId}> (${targetName})`, inline: true },
+                        { name: 'Timezone', value: data.timezone || 'Not set', inline: true },
+                        { name: 'Input', value: `\`\`\`${data.days}\`\`\``, inline: false }
+                    ],
+                    footer: { text: 'Use /availability set user:@user to fix this' }
+                });
+            }
+        } catch (err) {
+            console.error('Failed to send parse failure audit log:', err);
+        }
     }
 
     return submission.reply({ content: response, flags: MessageFlags.Ephemeral });
@@ -491,6 +516,92 @@ async function handlePostButton(interaction) {
         content: 'Availability button posted successfully.',
         flags: MessageFlags.Ephemeral
     });
+}
+
+async function handleList(interaction) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const entries = getGuildAvailability(interaction.guildId);
+
+    if (entries.length === 0) {
+        return interaction.editReply({
+            content: 'No members have set their availability yet. Use `/availability set` or `/availability post-button` to get started.'
+        });
+    }
+
+    // Fetch member info for all users
+    const memberList = [];
+    for (const entry of entries) {
+        let displayName = `<@${entry.userId}>`;
+        try {
+            const member = await interaction.guild.members.fetch(entry.userId).catch(() => null);
+            if (member) {
+                displayName = member.displayName;
+            }
+        } catch {
+            // Keep the mention format if fetch fails
+        }
+
+        // Check if parsing failed (has days input but no windows)
+        const parseFailed = entry.days && (!entry.windows || entry.windows.length === 0);
+        const status = parseFailed ? '⚠️' : '✓';
+
+        memberList.push({
+            displayName,
+            userId: entry.userId,
+            timezone: entry.timezone || '—',
+            days: entry.days || '—',
+            roles: entry.roles || '—',
+            parseFailed,
+            status
+        });
+    }
+
+    // Sort: parse failures first, then alphabetically
+    memberList.sort((a, b) => {
+        if (a.parseFailed && !b.parseFailed) return -1;
+        if (!a.parseFailed && b.parseFailed) return 1;
+        return a.displayName.localeCompare(b.displayName);
+    });
+
+    // Build embed
+    const parseFailures = memberList.filter(m => m.parseFailed).length;
+    const embed = new EmbedBuilder()
+        .setTitle('Availability List')
+        .setColor(parseFailures > 0 ? 0xf39c12 : 0x2ecc71)
+        .setDescription(
+            `**${entries.length} member${entries.length === 1 ? '' : 's'}** have set their availability.` +
+            (parseFailures > 0 ? `\n⚠️ **${parseFailures}** with parse issues (check their input)` : '')
+        );
+
+    // Build field content (limit to ~15 users per field due to Discord limits)
+    const lines = memberList.slice(0, 20).map(m => {
+        const tzStr = m.timezone !== '—' ? ` (${m.timezone})` : '';
+        const daysPreview = m.days.length > 30 ? m.days.substring(0, 27) + '...' : m.days;
+        return `${m.status} **${m.displayName}**${tzStr}\n   ${daysPreview}`;
+    });
+
+    if (lines.length > 0) {
+        embed.addFields({
+            name: 'Members',
+            value: lines.join('\n'),
+            inline: false
+        });
+    }
+
+    if (memberList.length > 20) {
+        embed.setFooter({ text: `Showing 20 of ${memberList.length} members` });
+    }
+
+    if (parseFailures > 0) {
+        embed.addFields({
+            name: 'Parse Failures',
+            value: 'Members marked with ⚠️ have entered availability that could not be parsed into time windows. Use `/availability set user:@user` to fix their input.',
+            inline: false
+        });
+    }
+
+    return interaction.editReply({ embeds: [embed] });
 }
 
 // Helper functions

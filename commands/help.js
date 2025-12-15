@@ -30,7 +30,8 @@ const CATEGORIES = {
             { name: '/availability summary', desc: 'Server-wide heatmap showing when the most users are available.' },
             { name: '/availability optimal [min_users]', desc: 'Find time slots where X+ members are available.' },
             { name: '/availability check <time>', desc: 'See who is available at a specific time (e.g., "Saturday 7pm").' },
-            { name: '/availability clear', desc: 'Remove your availability data from the server.' }
+            { name: '/availability clear', desc: 'Remove your availability data from the server.' },
+            { name: '/availability list', desc: 'View all members who have set availability (shows parse status).' }
         ],
         examples: [
             '**Time formats:** "Mon-Fri 7-10pm", "Weekends 6-11pm", "Everyday evenings"',

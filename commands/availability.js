@@ -203,7 +203,12 @@ async function handleSet(interaction) {
         }
     }
 
-    return submission.reply({ content: response, flags: MessageFlags.Ephemeral });
+    try {
+        return await submission.reply({ content: response, flags: MessageFlags.Ephemeral });
+    } catch (err) {
+        // Interaction expired (user took too long) - data was still saved
+        console.log(`Availability saved for ${targetId} but interaction expired:`, err.code);
+    }
 }
 
 async function handleView(interaction) {

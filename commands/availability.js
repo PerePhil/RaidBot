@@ -241,14 +241,15 @@ async function handleView(interaction) {
     // Show parsed windows if any, converted to viewer's timezone
     if (existing.windows && existing.windows.length > 0) {
         const windowStr = existing.windows
-            .slice(0, 5)
+            .slice(0, 10)
             .map(w => {
                 const localStart = convertUtcToLocal(w.start, viewerOffset);
                 const localEnd = convertUtcToLocal(w.end, viewerOffset);
                 return `${getDayName(w.day)} ${formatMinutes(localStart)}-${formatMinutes(localEnd)}`;
             })
             .join('\n');
-        embed.addFields({ name: `Parsed Time Windows (${tzLabel})`, value: windowStr, inline: false });
+        const overflow = existing.windows.length > 10 ? `\n_(+${existing.windows.length - 10} more)_` : '';
+        embed.addFields({ name: `Parsed Time Windows (${tzLabel})`, value: windowStr + overflow, inline: false });
     }
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });

@@ -164,7 +164,8 @@ function attachParsedWindows(data) {
 function parseAvailabilityWindows(text, tzHint) {
     if (!text || !text.trim()) return [];
     const lower = text.toLowerCase();
-    const segments = lower.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+    // Split on comma, semicolon, or standalone "or" (but not "or later")
+    const segments = lower.split(/[,;]+|\bor(?!\s+later)\b/).map((s) => s.trim()).filter(Boolean);
     const windows = [];
     const timezoneOffset = parseTimezone(tzHint);
     const now = new Date();
@@ -291,8 +292,18 @@ function extractDays(segment) {
     if (/weekend/i.test(lower)) {
         days.push(0, 6); // Sun, Sat
     }
-    if (/everyday|every\s*day|daily/i.test(lower)) {
+    if (/everyday|every\s*day|daily|any\s*day|whenever|flexible/i.test(lower)) {
         days.push(0, 1, 2, 3, 4, 5, 6);
+    }
+
+    // Handle slashed day pairs like "Sat/Sun" or "Saturday/Sunday"
+    const slashPattern = /\b(sun(?:day)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:s|nesday)?|thu(?:r?s?(?:day)?)?|fri(?:day)?|sat(?:urday)?)\s*\/\s*(sun(?:day)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:s|nesday)?|thu(?:r?s?(?:day)?)?|fri(?:day)?|sat(?:urday)?)\b/gi;
+    let slashMatch;
+    while ((slashMatch = slashPattern.exec(lower)) !== null) {
+        const day1 = parseDayName(slashMatch[1]);
+        const day2 = parseDayName(slashMatch[2]);
+        if (day1 !== -1) days.push(day1);
+        if (day2 !== -1) days.push(day2);
     }
 
     // Handle day ranges like "Mon-Fri", "Tue-Thu", "Monday-Friday"

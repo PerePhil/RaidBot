@@ -150,10 +150,10 @@ async function handleSet(interaction) {
     if (!submission) return;
 
     const data = {
-        timezone: submission.fields.getTextInputValue('timezone').trim(),
-        days: submission.fields.getTextInputValue('days').trim(),
-        roles: submission.fields.getTextInputValue('roles').trim(),
-        notes: submission.fields.getTextInputValue('notes').trim()
+        timezone: (submission.fields.getTextInputValue('timezone') || '').trim(),
+        days: (submission.fields.getTextInputValue('days') || '').trim(),
+        roles: (submission.fields.getTextInputValue('roles') || '').trim(),
+        notes: (submission.fields.getTextInputValue('notes') || '').trim()
     };
     setAvailability(interaction.guildId, targetId, data);
 

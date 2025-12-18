@@ -134,10 +134,10 @@ client.on('interactionCreate', async (interaction) => {
             const { setAvailability, getAvailability, parseTimezone } = require('./availabilityManager');
 
             const data = {
-                timezone: interaction.fields.getTextInputValue('timezone').trim(),
-                days: interaction.fields.getTextInputValue('days').trim(),
-                roles: interaction.fields.getTextInputValue('roles').trim(),
-                notes: interaction.fields.getTextInputValue('notes').trim()
+                timezone: (interaction.fields.getTextInputValue('timezone') || '').trim(),
+                days: (interaction.fields.getTextInputValue('days') || '').trim(),
+                roles: (interaction.fields.getTextInputValue('roles') || '').trim(),
+                notes: (interaction.fields.getTextInputValue('notes') || '').trim()
             };
             setAvailability(interaction.guildId, interaction.user.id, data);
 

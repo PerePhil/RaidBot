@@ -777,6 +777,64 @@ function recordRaidStats(raidData) {
     }
 }
 
+/**
+ * Record user activity without counting as a raid completion.
+ * Used for waitlist signups - they're "active" but not yet in a raid.
+ * @param {string} guildId - The guild ID
+ * @param {string} userId - The user ID
+ * @param {number} [timestamp] - Optional timestamp (defaults to now)
+ */
+function recordUserActivity(guildId, userId, timestamp = null) {
+    if (!userId) return;
+
+    const activityTime = timestamp || Date.now();
+    const stmts = getStatements();
+
+    // Update guild stats - only touch lastRaidAt if this activity is more recent
+    const guildStats = getGuildUserStats(guildId, userId);
+
+    // Only update if this is more recent activity
+    if (!guildStats.lastRaidAt || activityTime > guildStats.lastRaidAt) {
+        guildStats.lastRaidAt = activityTime;
+        guildStats.lastUpdated = Date.now();
+
+        if (!guildParticipation.has(guildId)) {
+            guildParticipation.set(guildId, new Map());
+        }
+        guildParticipation.get(guildId).set(userId, guildStats);
+
+        // Persist to database
+        stmts.upsertGuildUserStats.run({
+            guild_id: guildId,
+            user_id: userId,
+            total_raids: guildStats.totalRaids,
+            role_counts: JSON.stringify(guildStats.roleCounts),
+            template_counts: JSON.stringify(guildStats.templateCounts),
+            weekday_counts: JSON.stringify(guildStats.weekdayCounts),
+            last_updated: guildStats.lastUpdated,
+            last_raid_at: guildStats.lastRaidAt
+        });
+    }
+
+    // Also update global user stats
+    const userStats = getUserStats(userId);
+    if (!userStats.lastRaidAt || activityTime > userStats.lastRaidAt) {
+        userStats.lastRaidAt = activityTime;
+        userStats.lastUpdated = Date.now();
+        raidStats.set(userId, userStats);
+
+        stmts.upsertUserStats.run({
+            user_id: userId,
+            total_raids: userStats.totalRaids,
+            role_counts: JSON.stringify(userStats.roleCounts),
+            template_counts: JSON.stringify(userStats.templateCounts),
+            weekday_counts: JSON.stringify(userStats.weekdayCounts),
+            last_updated: userStats.lastUpdated,
+            last_raid_at: userStats.lastRaidAt
+        });
+    }
+}
+
 // Legacy compatibility - safeWriteFile (may still be used by other modules)
 function safeWriteFile(filePath, contents, backupPath) {
     const directory = path.dirname(filePath);
@@ -855,6 +913,7 @@ module.exports = {
     updateGuildSettings,
     loadRaidStats,
     recordRaidStats,
+    recordUserActivity,
     getUserStats,
     getGuildUserStats,
     saveRaidStats,

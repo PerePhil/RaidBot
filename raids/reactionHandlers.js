@@ -1,4 +1,4 @@
-const { activeRaids, markActiveRaidUpdated, getSignupRoles } = require('../state');
+const { activeRaids, markActiveRaidUpdated, getSignupRoles, recordUserActivity } = require('../state');
 const { updateRaidEmbed, updateMuseumEmbed } = require('../utils/raidHelpers');
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
 const { reactionLimiter } = require('../utils/rateLimiter');
@@ -79,6 +79,10 @@ async function handleReactionAdd(reaction, user) {
     if (role.users.length >= role.slots) {
         if (!role.waitlist.includes(user.id)) {
             role.waitlist.push(user.id);
+            // Record activity for waitlist signup (tracks as active but not as completed raid)
+            if (raidData.guildId) {
+                recordUserActivity(raidData.guildId, user.id);
+            }
         }
         await updateRaidEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
@@ -161,6 +165,10 @@ async function handleMuseumReactionAdd(reaction, user, raidData) {
     if (raidData.signups.length >= maxSlots) {
         if (!raidData.waitlist.includes(user.id)) {
             raidData.waitlist.push(user.id);
+            // Record activity for waitlist signup (tracks as active but not as completed raid)
+            if (raidData.guildId) {
+                recordUserActivity(raidData.guildId, user.id);
+            }
         }
         await updateMuseumEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);

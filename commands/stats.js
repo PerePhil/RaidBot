@@ -42,10 +42,20 @@ module.exports = {
                         .setRequired(false)))
         .addSubcommand((sub) =>
             sub.setName('inactive')
-                .setDescription('View members with no participation')
+                .setDescription('View members with no recent participation')
+                .addIntegerOption((opt) =>
+                    opt.setName('weeks')
+                        .setDescription('Show members inactive for at least X weeks (0 = never participated)')
+                        .setMinValue(0)
+                        .setMaxValue(52)
+                        .setRequired(false))
                 .addRoleOption((opt) =>
                     opt.setName('role')
                         .setDescription('Optional: limit to members with this role')
+                        .setRequired(false))
+                .addBooleanOption((opt) =>
+                    opt.setName('refresh')
+                        .setDescription('Force refresh member list from Discord (slower but more accurate)')
                         .setRequired(false)))
         .addSubcommand((sub) =>
             sub.setName('export')
@@ -255,68 +265,103 @@ async function handleMonthlyReport(interaction) {
 // ============= INACTIVE MEMBERS =============
 async function handleInactive(interaction) {
     const filterRole = interaction.options.getRole('role');
+    const forceRefresh = interaction.options.getBoolean('refresh') || false;
+    const weeksInactive = interaction.options.getInteger('weeks') || 0;
     const guildId = interaction.guildId;
     const guildMap = guildParticipation.get(guildId) || new Map();
 
     let members = null;
     let partialNote = '';
 
-    // Try cached role members first
-    if (filterRole && filterRole.members?.size > 0) {
-        members = filterRole.members;
-        partialNote = '\n\n_(Used cached role members; list may be incomplete.)_';
-    }
+    // Always try to fetch fresh members first
+    try {
+        // Longer timeout for refresh option
+        const timeout = forceRefresh ? 30_000 : 15_000;
+        members = await interaction.guild.members.fetch({ withPresences: false, time: timeout });
+    } catch (error) {
+        console.warn('Failed to fetch members for inactive list:', error?.code || error);
 
-    if (!members) {
-        try {
-            members = await interaction.guild.members.fetch({ withPresences: false, time: 15_000 });
-        } catch (error) {
-            console.warn('Failed to fetch members for inactive list:', error?.code || error);
-            if (filterRole && filterRole.members?.size > 0) {
-                members = filterRole.members;
-                partialNote = '\n\n_(Member fetch timed out; using cached role members.)_';
-            } else {
-                members = interaction.guild.members.cache;
-                if (members && members.size > 0) {
-                    partialNote = '\n\n_(Member fetch timed out; using cached members.)_';
-                } else {
-                    return interaction.editReply({
-                        content: 'Unable to load member list. Please try again.'
-                    });
-                }
-            }
+        // Fall back to cached members
+        if (filterRole && filterRole.members?.size > 0) {
+            members = filterRole.members;
+            partialNote = '\n\n_(Member fetch timed out; using cached role members. Try `/stats inactive refresh:True` for better accuracy.)_';
+        } else if (interaction.guild.members.cache?.size > 0) {
+            members = interaction.guild.members.cache;
+            partialNote = '\n\n_(Member fetch timed out; using cached members. Try `/stats inactive refresh:True` for better accuracy.)_';
+        } else {
+            return interaction.editReply({
+                content: 'Unable to load member list. Please try again later.'
+            });
         }
     }
+
+    // Calculate the cutoff timestamp for week-based filtering
+    const cutoffTimestamp = weeksInactive > 0
+        ? Date.now() - (weeksInactive * 7 * 24 * 60 * 60 * 1000)
+        : null;
 
     const inactive = [];
     for (const member of members.values()) {
         if (member.user.bot) continue;
         if (filterRole && !member.roles.cache.has(filterRole.id)) continue;
+
         const stats = guildMap.get(member.id);
-        if (!stats || (stats.totalRaids || 0) === 0) {
-            inactive.push(member);
+
+        if (weeksInactive > 0) {
+            // Week-based filtering: check if lastRaidAt is older than cutoff or null
+            const lastActive = stats?.lastRaidAt || null;
+            if (!lastActive || lastActive < cutoffTimestamp) {
+                inactive.push({ member, lastActive });
+            }
+        } else {
+            // Original behavior: only show members who have never participated
+            if (!stats || (stats.totalRaids || 0) === 0) {
+                inactive.push({ member, lastActive: null });
+            }
         }
     }
 
+    // Sort by last active date (oldest/never first)
+    inactive.sort((a, b) => {
+        if (!a.lastActive && !b.lastActive) return 0;
+        if (!a.lastActive) return -1;
+        if (!b.lastActive) return 1;
+        return a.lastActive - b.lastActive;
+    });
+
     const qualifier = filterRole ? ` with role "${filterRole.name}"` : '';
+    const refreshNote = forceRefresh && !partialNote ? '\n\n_(Fetched fresh member list from Discord.)_' : '';
+    const weeksLabel = weeksInactive > 0
+        ? `inactive for ${weeksInactive}+ week${weeksInactive === 1 ? '' : 's'}`
+        : 'with no recorded raids';
+
     if (inactive.length === 0) {
+        const successMsg = weeksInactive > 0
+            ? `Everyone${qualifier} has been active within the last ${weeksInactive} week${weeksInactive === 1 ? '' : 's'}.`
+            : `Everyone${qualifier} has at least one recorded raid signup.`;
         const embed = new EmbedBuilder()
             .setTitle('Inactive Members')
-            .setDescription(`Everyone${qualifier} has at least one recorded raid signup.${partialNote}`)
+            .setDescription(`${successMsg}${partialNote}${refreshNote}`)
             .setColor(0x57F287);
         return interaction.editReply({ embeds: [embed] });
     }
 
-    const list = inactive.slice(0, 20).map((m) => `• ${m.user.username}`).join('\n');
+    // Format the list with last active dates
+    const list = inactive.slice(0, 20).map(({ member, lastActive }) => {
+        const lastActiveStr = lastActive
+            ? ` _(last: ${new Date(lastActive).toLocaleDateString()})_`
+            : weeksInactive > 0 ? ' _(never)_' : '';
+        return `• ${member.user.username}${lastActiveStr}`;
+    }).join('\n');
     const more = inactive.length > 20 ? `\n...and ${inactive.length - 20} more.` : '';
 
     const embed = new EmbedBuilder()
         .setTitle('Inactive Members')
         .setDescription([
-            `Members${qualifier} with no recorded raids (${inactive.length}):`,
+            `Members${qualifier} ${weeksLabel} (${inactive.length}):`,
             list,
             more,
-            partialNote
+            partialNote || refreshNote
         ].filter(Boolean).join('\n'))
         .setColor(0xFEE75C);
 

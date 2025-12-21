@@ -93,7 +93,7 @@ const CATEGORIES = {
             { name: '/stats server', desc: 'View top participants and total raid counts.' },
             { name: '/stats weekly [weeks_back]', desc: 'Weekly participation report with trends.' },
             { name: '/stats monthly [months_back]', desc: 'Monthly participation report with trends.' },
-            { name: '/stats inactive [role]', desc: 'List members with no raid participation.' },
+            { name: '/stats inactive [weeks] [role]', desc: 'List inactive members. Use weeks to filter by time since last activity (e.g., weeks:4 = inactive 4+ weeks). Waitlist signups count as activity.' },
             { name: '/stats export', desc: 'Download all participation data as a CSV file.' },
             { name: '/availability set user:@someone', desc: 'Set availability for another user (Admin).' },
             { name: '/availability post-button', desc: 'Post a persistent "Set Availability" button for onboarding.' }

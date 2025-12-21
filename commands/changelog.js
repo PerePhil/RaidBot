@@ -3,33 +3,34 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('changelog')
-        .setDescription('Show recent changes (Release 10)'),
+        .setDescription('Show recent changes (Release 11)'),
     async execute(interaction) {
         const embed = new EmbedBuilder()
-            .setTitle('Release 10 Changelog')
-            .setDescription('Availability management improvements and admin tools.')
+            .setTitle('Release 11 Changelog')
+            .setDescription('Enhanced inactive member detection and activity tracking.')
             .addFields(
                 {
-                    name: 'Availability List',
+                    name: 'Inactive Member Filtering',
                     value: [
-                        '• `/availability list` — view all members who have set availability',
-                        '• Shows timezone and days input at a glance',
-                        '• Parse failures flagged with ⚠️ and sorted to the top'
+                        '• `/stats inactive weeks:4` — find members inactive for 4+ weeks',
+                        '• Shows last active date for each member',
+                        '• `refresh:True` option forces fresh member list from Discord',
+                        '• Results sorted with longest inactive first'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Parse Failure Notifications',
+                    name: 'Waitlist Activity Tracking',
                     value: [
-                        '• Admins notified via audit log when time parsing fails',
-                        '• Users see a warning if their input could not be parsed',
-                        '• Easy to fix with `/availability set user:@user`'
+                        '• Joining a waitlist now counts as "activity"',
+                        '• Waitlisted members won\'t show as inactive',
+                        '• Raid completion count remains accurate (only actual signups)'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Previous (Release 9)',
-                    value: 'Timezone support, check/clear commands, post-button for onboarding',
+                    name: 'Previous (Release 10)',
+                    value: 'Availability list command, parse failure notifications, admin audit logging',
                     inline: false
                 }
             );

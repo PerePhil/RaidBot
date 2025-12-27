@@ -11,6 +11,7 @@ function dataPath(filename) {
 const activeRaids = new Map();
 const raidChannels = new Map();
 const museumChannels = new Map();
+const keyChannels = new Map();
 const guildSettings = new Map();
 const raidStats = new Map();
 const guildParticipation = new Map();
@@ -28,17 +29,18 @@ function getStatements() {
         // Guilds
         getGuild: prepare('SELECT * FROM guilds WHERE id = ?'),
         upsertGuild: prepare(`
-            INSERT INTO guilds (id, raid_channel_id, museum_channel_id, audit_channel_id,
+            INSERT INTO guilds (id, raid_channel_id, museum_channel_id, key_channel_id, audit_channel_id,
                 creator_reminder_seconds, participant_reminder_seconds, auto_close_seconds,
                 last_auto_close_seconds, creator_reminders_enabled, participant_reminders_enabled,
                 raid_leader_role_id, threads_enabled, thread_auto_archive_minutes)
-            VALUES (@id, @raid_channel_id, @museum_channel_id, @audit_channel_id,
+            VALUES (@id, @raid_channel_id, @museum_channel_id, @key_channel_id, @audit_channel_id,
                 @creator_reminder_seconds, @participant_reminder_seconds, @auto_close_seconds,
                 @last_auto_close_seconds, @creator_reminders_enabled, @participant_reminders_enabled,
                 @raid_leader_role_id, @threads_enabled, @thread_auto_archive_minutes)
             ON CONFLICT(id) DO UPDATE SET
                 raid_channel_id = excluded.raid_channel_id,
                 museum_channel_id = excluded.museum_channel_id,
+                key_channel_id = excluded.key_channel_id,
                 audit_channel_id = excluded.audit_channel_id,
                 creator_reminder_seconds = excluded.creator_reminder_seconds,
                 participant_reminder_seconds = excluded.participant_reminder_seconds,
@@ -52,6 +54,7 @@ function getStatements() {
         `),
         updateGuildChannel: prepare('UPDATE guilds SET raid_channel_id = ? WHERE id = ?'),
         updateMuseumChannel: prepare('UPDATE guilds SET museum_channel_id = ? WHERE id = ?'),
+        updateKeyChannel: prepare('UPDATE guilds SET key_channel_id = ? WHERE id = ?'),
 
         // Raids
         getRaid: prepare('SELECT * FROM raids WHERE message_id = ?'),
@@ -197,6 +200,30 @@ function setMuseumChannel(guildId, channelId) {
         museumChannels.set(guildId, channelId);
     } else {
         museumChannels.delete(guildId);
+    }
+}
+
+// ===== KEY CHANNELS =====
+
+function loadKeyChannels() {
+    keyChannels.clear();
+    const rows = prepare('SELECT id, key_channel_id FROM guilds WHERE key_channel_id IS NOT NULL').all();
+    rows.forEach(row => keyChannels.set(row.id, row.key_channel_id));
+    console.log(`Loaded ${keyChannels.size} key channel configurations`);
+}
+
+function saveKeyChannels() {
+    // No-op: changes are persisted immediately
+}
+
+function setKeyChannel(guildId, channelId) {
+    const stmts = getStatements();
+    stmts.ensureGuild.run(guildId);
+    stmts.updateKeyChannel.run(channelId, guildId);
+    if (channelId) {
+        keyChannels.set(guildId, channelId);
+    } else {
+        keyChannels.delete(guildId);
     }
 }
 
@@ -370,6 +397,7 @@ function updateGuildSettings(guildId, updates) {
         id: guildId,
         raid_channel_id: row?.raid_channel_id || raidChannels.get(guildId) || null,
         museum_channel_id: row?.museum_channel_id || museumChannels.get(guildId) || null,
+        key_channel_id: row?.key_channel_id || keyChannels.get(guildId) || null,
         audit_channel_id: row?.audit_channel_id || null,
         creator_reminder_seconds: newSettings.creatorReminderSeconds,
         participant_reminder_seconds: newSettings.participantReminderSeconds,
@@ -402,6 +430,7 @@ function loadActiveRaidState() {
 
 function reconstructRaidData(raid, signups) {
     const isMuseum = raid.type === 'museum';
+    const isKey = raid.type === 'key';
 
     const raidData = {
         raidId: raid.raid_id,
@@ -417,10 +446,10 @@ function reconstructRaidData(raid, signups) {
         participantReminderSent: raid.participant_reminder_sent === 1
     };
 
-    if (isMuseum) {
+    if (isMuseum || isKey) {
         raidData.maxSlots = raid.max_slots || 12;
         raidData.signups = signups.filter(s => !s.is_waitlist).map(s => s.user_id);
-        // Load museum waitlist
+        // Load waitlist (using museum_waitlist table for both museum and key)
         const stmts = getStatements();
         const waitlist = stmts.getMuseumWaitlist.all(raid.message_id);
         raidData.waitlist = waitlist.map(w => w.user_id);
@@ -542,15 +571,17 @@ function syncSignupsToDb(messageId, raidData) {
         // Delete existing signups for this raid
         stmts.deleteRaidSignups.run(messageId);
 
-        if (raidData.type === 'museum') {
-            // Museum signups
+        if (raidData.type === 'museum' || raidData.type === 'key') {
+            // Museum/Key signups
             if (Array.isArray(raidData.signups)) {
+                const roleName = raidData.type === 'key' ? 'Key Boss' : 'Museum';
+                const roleEmoji = raidData.type === 'key' ? '🔑' : '✅';
                 raidData.signups.forEach((userId, index) => {
                     stmts.insertSignup.run({
                         message_id: messageId,
                         user_id: userId,
-                        role_name: 'Museum',
-                        role_emoji: '✅',
+                        role_name: roleName,
+                        role_emoji: roleEmoji,
                         role_icon: null,
                         group_name: null,
                         slot_index: index,
@@ -560,7 +591,7 @@ function syncSignupsToDb(messageId, raidData) {
                     });
                 });
             }
-            // Museum waitlist
+            // Waitlist (museum_waitlist table is reused for both)
             if (Array.isArray(raidData.waitlist)) {
                 prepare('DELETE FROM museum_waitlist WHERE message_id = ?').run(messageId);
                 raidData.waitlist.forEach((userId, index) => {
@@ -770,6 +801,8 @@ function recordRaidStats(raidData) {
 
     if (raidData.type === 'museum') {
         raidData.signups.forEach((userId) => incrementUser(userId, 'Museum'));
+    } else if (raidData.type === 'key') {
+        raidData.signups.forEach((userId) => incrementUser(userId, 'Key Boss'));
     } else {
         raidData.signups.forEach((role) => {
             role.users.forEach((userId) => incrementUser(userId, role.name));
@@ -881,6 +914,7 @@ module.exports = {
     activeRaids,
     raidChannels,
     museumChannels,
+    keyChannels,
     guildSettings,
     raidStats,
     guildParticipation,
@@ -890,6 +924,9 @@ module.exports = {
     saveRaidChannels,
     loadMuseumChannels,
     saveMuseumChannels,
+    loadKeyChannels,
+    saveKeyChannels,
+    setKeyChannel,
     loadAdminRoles,
     saveAdminRoles,
     getAdminRoles,

@@ -5,6 +5,7 @@ const { registerCommands } = require('./commands/registerCommands');
 const {
     loadRaidChannels,
     loadMuseumChannels,
+    loadKeyChannels,
     loadGuildSettings,
     loadRaidStats,
     getAdminRoles,
@@ -50,6 +51,7 @@ client.once('clientReady', async () => {
 
     loadRaidChannels();
     loadMuseumChannels();
+    loadKeyChannels();
     loadGuildSettings();
     loadRaidStats();
     loadTemplateOverrides();

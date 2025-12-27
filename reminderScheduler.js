@@ -50,6 +50,12 @@ async function runReminderCheck() {
             continue;
         }
 
+        // Auto-close key boss raids at start time to lock signups and record analytics
+        if (!raidData.closed && raidData.type === 'key' && !raidData.autoCloseExecuted && secondsUntil <= 0) {
+            await autoCloseKey(client, raidData, messageId);
+            continue;
+        }
+
         if (raidData.closed || secondsUntil <= 0) continue;
 
         let updated = false;
@@ -199,5 +205,28 @@ async function autoCloseMuseum(client, raidData, messageId) {
         await updateBotPresence();
         markActiveRaidUpdated(messageId);
         await sendAuditLog(guild, `Museum ${raidData.raidId || '?'} auto-locked at start time with ${signupCount} participant(s). Attendance recorded for analytics.`);
+    }
+}
+
+/**
+ * Auto-close key boss raids at start time to lock signups and record attendance analytics
+ */
+async function autoCloseKey(client, raidData, messageId) {
+    if (!raidData.guildId) return;
+    if (raidData.closed) return;
+
+    const guild = await resolveGuild(client, raidData.guildId);
+    if (!guild) return;
+
+    const message = await fetchRaidMessage(guild, raidData, messageId);
+    if (!message) return;
+
+    const signupCount = raidData.signups?.length || 0;
+    const closed = await closeRaidSignup(message, raidData, { reason: 'key_start' });
+    if (closed) {
+        raidData.autoCloseExecuted = true;
+        await updateBotPresence();
+        markActiveRaidUpdated(messageId);
+        await sendAuditLog(guild, `Gold Key Boss ${raidData.raidId || '?'} auto-locked at start time with ${signupCount} participant(s). Attendance recorded for analytics.`);
     }
 }

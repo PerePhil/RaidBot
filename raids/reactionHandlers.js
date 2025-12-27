@@ -1,5 +1,5 @@
 const { activeRaids, markActiveRaidUpdated, getSignupRoles, recordUserActivity } = require('../state');
-const { updateRaidEmbed, updateMuseumEmbed } = require('../utils/raidHelpers');
+const { updateRaidEmbed, updateMuseumEmbed, updateKeyEmbed } = require('../utils/raidHelpers');
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
 const { reactionLimiter } = require('../utils/rateLimiter');
 
@@ -44,6 +44,16 @@ async function handleReactionAdd(reaction, user) {
             return;
         }
         await handleMuseumReactionAdd(reaction, user, raidData);
+        return;
+    }
+
+    if (raidData.type === 'key') {
+        if (!allowedCheck.allowed) {
+            await reaction.users.remove(user.id);
+            await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'key boss'));
+            return;
+        }
+        await handleKeyReactionAdd(reaction, user, raidData);
         return;
     }
 
@@ -124,6 +134,11 @@ async function handleReactionRemove(reaction, user) {
 
     if (raidData.type === 'museum') {
         await handleMuseumReactionRemove(reaction, user, raidData);
+        return;
+    }
+
+    if (raidData.type === 'key') {
+        await handleKeyReactionRemove(reaction, user, raidData);
         return;
     }
 
@@ -208,6 +223,68 @@ async function handleMuseumReactionRemove(reaction, user, raidData) {
     if (waitlistIndex > -1) {
         raidData.waitlist.splice(waitlistIndex, 1);
         await updateMuseumEmbed(reaction.message, raidData);
+        markActiveRaidUpdated(reaction.message.id);
+    }
+}
+
+async function handleKeyReactionAdd(reaction, user, raidData) {
+    if (reaction.emoji.name !== '🔑') {
+        return;
+    }
+
+    if (raidData.signups.includes(user.id)) {
+        return;
+    }
+
+    const maxSlots = raidData.maxSlots || 12;
+    raidData.waitlist = raidData.waitlist || [];
+
+    if (raidData.signups.length >= maxSlots) {
+        if (!raidData.waitlist.includes(user.id)) {
+            raidData.waitlist.push(user.id);
+            // Record activity for waitlist signup
+            if (raidData.guildId) {
+                recordUserActivity(raidData.guildId, user.id);
+            }
+        }
+        await updateKeyEmbed(reaction.message, raidData);
+        markActiveRaidUpdated(reaction.message.id);
+        await safeDm(user, 'The key boss signup is full. You have been added to the waitlist and will be notified when a spot opens.');
+        return;
+    }
+
+    raidData.signups.push(user.id);
+    await updateKeyEmbed(reaction.message, raidData);
+    markActiveRaidUpdated(reaction.message.id);
+
+    if (raidData.signups.length >= maxSlots) {
+        try {
+            const creator = await reaction.message.client.users.fetch(raidData.creatorId);
+            await creator.send(`Your Gold Key Boss signup (ID: \`${raidData.raidId}\`) is now full!`);
+        } catch (error) {
+            console.error('Could not send DM to raid creator:', error);
+        }
+    }
+}
+
+async function handleKeyReactionRemove(reaction, user, raidData) {
+    if (reaction.emoji.name !== '🔑') return;
+    raidData.waitlist = raidData.waitlist || [];
+
+    const signupIndex = raidData.signups.indexOf(user.id);
+    if (signupIndex > -1) {
+        raidData.signups.splice(signupIndex, 1);
+
+        await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
+        await updateKeyEmbed(reaction.message, raidData);
+        markActiveRaidUpdated(reaction.message.id);
+        return;
+    }
+
+    const waitlistIndex = raidData.waitlist.indexOf(user.id);
+    if (waitlistIndex > -1) {
+        raidData.waitlist.splice(waitlistIndex, 1);
+        await updateKeyEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
     }
 }

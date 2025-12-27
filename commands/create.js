@@ -15,7 +15,9 @@ const {
     parseDateTimeToTimestamp,
     getRaidSignupChannel,
     getMuseumSignupChannel,
-    updateMuseumEmbed
+    getKeySignupChannel,
+    updateMuseumEmbed,
+    updateKeyEmbed
 } = require('../utils/raidHelpers');
 const { updateBotPresence } = require('../presence');
 const { templatesForGuild } = require('../templatesManager');
@@ -175,7 +177,10 @@ function buildComponents(state) {
             new StringSelectMenuBuilder()
                 .setCustomId('create:type')
                 .setPlaceholder('Select activity type')
-                .addOptions(options.concat({ label: 'Museum Signup', value: 'museum' }))
+                .addOptions(options.concat([
+                    { label: 'Museum Signup', value: 'museum' },
+                    { label: 'Gold Key Boss', value: 'key' }
+                ]))
         ));
     } else {
         rows.push(new ActionRowBuilder().addComponents(
@@ -187,7 +192,7 @@ function buildComponents(state) {
         ));
     }
 
-    if (state.type && state.type !== 'museum') {
+    if (state.type && state.type !== 'museum' && state.type !== 'key') {
         rows.push(new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('create:length')
@@ -245,7 +250,7 @@ function disableComponents(rows) {
 
 function isReady(state) {
     if (!state.type || !state.datetime) return false;
-    if (state.type !== 'museum' && !state.length) return false;
+    if (state.type !== 'museum' && state.type !== 'key' && !state.length) return false;
     if (state.type === 'dragonspyre' && !state.strategy) return false;
     return true;
 }
@@ -255,7 +260,8 @@ function labelForType(type) {
         dragonspyre: 'Dragonspyre (Voracious Void)',
         lemuria: 'Lemuria (Ghastly Conspiracy)',
         polaris: 'Polaris (Cabal\'s Revenge)',
-        museum: 'Museum Signup'
+        museum: 'Museum Signup',
+        key: 'Gold Key Boss'
     };
     return map[type] || type;
 }
@@ -277,6 +283,9 @@ async function handleCreate(interaction, state) {
 
     if (state.type === 'museum') {
         return createMuseum(interaction, state, timestamp);
+    }
+    if (state.type === 'key') {
+        return createKey(interaction, state, timestamp);
     }
     return createRaid(interaction, state, timestamp);
 }
@@ -354,6 +363,88 @@ async function createMuseum(interaction, state, timestamp) {
     const replyContent = threadId
         ? `Museum signup created in ${signupChannel}! Discussion: <#${threadId}>`
         : `Museum signup created in ${signupChannel}!`;
+
+    await interaction.editReply({
+        content: replyContent,
+        embeds: [],
+        components: []
+    });
+    return true;
+}
+
+async function createKey(interaction, state, timestamp) {
+    const signupChannel = await getKeySignupChannel(interaction.guild);
+    if (!signupChannel) {
+        await interaction.followUp({
+            content: 'No key boss channel configured. Use `/setchannel` to pick one (or pass the key channel option), or create a channel named "key-signups".',
+            flags: MessageFlags.Ephemeral
+        });
+        return false;
+    }
+
+    const raidId = generateRaidId();
+    const timestampStr = timestamp ? `<t:${timestamp}:F>` : state.datetime;
+    const embed = new EmbedBuilder()
+        .setColor('#FFD700')
+        .setTitle('Gold Key Boss')
+        .setDescription('React with 🔑 to reserve a slot. Max 12 players.')
+        .addFields(
+            {
+                name: '\n**Date + Time:**',
+                value: timestampStr,
+                inline: false
+            },
+            {
+                name: '\u200b',
+                value: `*Raid ID: \`${raidId}\`*\nCreated by <@${interaction.user.id}>`,
+                inline: false
+            }
+        )
+        .setTimestamp(timestamp ? new Date(timestamp * 1000) : undefined);
+
+    await interaction.editReply({ content: 'Creating key boss signup...', embeds: [], components: [] });
+    const keyMessage = await signupChannel.send({ embeds: [embed] });
+    await keyMessage.react('🔑');
+
+    // Create discussion thread if enabled
+    let threadId = null;
+    const settings = getGuildSettings(interaction.guild.id);
+    if (settings.threadsEnabled) {
+        try {
+            const thread = await keyMessage.startThread({
+                name: `Key Boss - ${raidId}`,
+                autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
+            });
+            threadId = thread.id;
+            await thread.send(`💬 Discussion thread for **Gold Key Boss** (ID: \`${raidId}\`)\n⏰ Time: <t:${timestamp}:F>`);
+        } catch (error) {
+            console.error('Failed to create key boss thread:', error);
+        }
+    }
+
+    const raidData = {
+        raidId,
+        type: 'key',
+        signups: [],
+        datetime: state.datetime,
+        timestamp,
+        creatorId: interaction.user.id,
+        guildId: interaction.guild.id,
+        maxSlots: 12,
+        waitlist: [],
+        channelId: signupChannel.id,
+        threadId,
+        creatorReminderSent: false,
+        participantReminderSent: false
+    };
+
+    setActiveRaid(keyMessage.id, raidData);
+    await updateKeyEmbed(keyMessage, raidData);
+    await updateBotPresence();
+
+    const replyContent = threadId
+        ? `Key boss signup created in ${signupChannel}! Discussion: <#${threadId}>`
+        : `Key boss signup created in ${signupChannel}!`;
 
     await interaction.editReply({
         content: replyContent,

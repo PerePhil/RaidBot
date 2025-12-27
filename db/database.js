@@ -61,6 +61,8 @@ function runMigrations() {
         // Spawn schedule support (added Dec 2024)
         { table: 'recurring_raids', column: 'spawn_day_of_week', sql: 'ALTER TABLE recurring_raids ADD COLUMN spawn_day_of_week INTEGER' },
         { table: 'recurring_raids', column: 'spawn_time_of_day', sql: 'ALTER TABLE recurring_raids ADD COLUMN spawn_time_of_day TEXT' },
+        // Key boss signups support (added Dec 2024)
+        { table: 'guilds', column: 'key_channel_id', sql: 'ALTER TABLE guilds ADD COLUMN key_channel_id TEXT' },
     ];
 
     for (const migration of migrations) {

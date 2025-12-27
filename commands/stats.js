@@ -346,21 +346,19 @@ async function handleInactive(interaction) {
         return interaction.editReply({ embeds: [embed] });
     }
 
-    // Format the list with last active dates
-    const list = inactive.slice(0, 20).map(({ member, lastActive }) => {
+    // Format the list with last active dates - make names clickable with mentions
+    const list = inactive.map(({ member, lastActive }) => {
         const lastActiveStr = lastActive
             ? ` _(last: ${new Date(lastActive).toLocaleDateString()})_`
             : weeksInactive > 0 ? ' _(never)_' : '';
-        return `• ${member.user.username}${lastActiveStr}`;
+        return `• <@${member.id}>${lastActiveStr}`;
     }).join('\n');
-    const more = inactive.length > 20 ? `\n...and ${inactive.length - 20} more.` : '';
 
     const embed = new EmbedBuilder()
         .setTitle('Inactive Members')
         .setDescription([
             `Members${qualifier} ${weeksLabel} (${inactive.length}):`,
             list,
-            more,
             partialNote || refreshNote
         ].filter(Boolean).join('\n'))
         .setColor(0xFEE75C);

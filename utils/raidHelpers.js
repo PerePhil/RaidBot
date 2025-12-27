@@ -1,6 +1,6 @@
 const chrono = require('chrono-node');
 const { EmbedBuilder, ChannelType } = require('discord.js');
-const { activeRaids, raidChannels, museumChannels, recordRaidStats, getGuildSettings } = require('../state');
+const { activeRaids, raidChannels, museumChannels, keyChannels, recordRaidStats, getGuildSettings } = require('../state');
 const { recordRaidAnalytics } = require('./analytics');
 const { sendAuditLog } = require('../auditLog');
 const { buildLabelsForRaid } = require('./userLabels');
@@ -32,6 +32,27 @@ async function getMuseumSignupChannel(guild) {
     const fallback = guild.channels.cache.find(
         (ch) => ch.type === ChannelType.GuildText &&
             (ch.name === 'museum-signups' || ch.name === 'museum signups')
+    );
+
+    if (fallback) {
+        return fallback;
+    }
+
+    return getRaidSignupChannel(guild);
+}
+
+async function getKeySignupChannel(guild) {
+    const configuredChannelId = keyChannels.get(guild.id);
+    if (configuredChannelId) {
+        const channel = await fetchChannelById(guild, configuredChannelId);
+        if (channel) {
+            return channel;
+        }
+    }
+
+    const fallback = guild.channels.cache.find(
+        (ch) => ch.type === ChannelType.GuildText &&
+            (ch.name === 'key-signups' || ch.name === 'key signups')
     );
 
     if (fallback) {
@@ -242,8 +263,66 @@ async function updateMuseumEmbed(message, raidData) {
     await message.edit({ embeds: [embed] });
 }
 
+async function updateKeyEmbed(message, raidData) {
+    const embed = EmbedBuilder.from(message.embeds[0]);
+    const existingFields = embed.data.fields || [];
+    const guildSettings = raidData.guildId ? getGuildSettings(raidData.guildId) : null;
+    const userLabels = await buildLabelsForRaid(
+        raidData,
+        { guild: message.guild, client: message.client },
+        { leaderRoleId: guildSettings?.raidLeaderRoleId }
+    );
+    const signupLines = raidData.signups
+        .map((userId, idx) => {
+            const label = userLabels.get(userId) || 'Unknown';
+            return `${idx + 1}. [**${label}**](https://discord.com/users/${userId})`;
+        });
+    const fieldValue = signupLines.length > 0
+        ? `${signupLines.join('\n')}\n\nSlots: ${raidData.signups.length}/${raidData.maxSlots}`
+        : `No signups yet.\n\nSlots: 0/${raidData.maxSlots}`;
+
+    const raidIdField = existingFields.find((f) => f.value && f.value.includes('Raid ID:'));
+    const statusField = existingFields.find((f) => f.name === '\n**Status:**');
+    const dateField = {
+        name: '\n**Date + Time:**',
+        value: raidData.timestamp ? `<t:${raidData.timestamp}:F>` : (raidData.datetime || 'Not specified'),
+        inline: false
+    };
+    const waitlistLines = (raidData.waitlist || [])
+        .map((userId, idx) => {
+            const label = userLabels.get(userId) || 'Unknown';
+            return `${idx + 1}. [**${label}**](https://discord.com/users/${userId})`;
+        });
+    const newFields = [
+        dateField,
+        {
+            name: '\n**Signups:**',
+            value: fieldValue,
+            inline: false
+        }
+    ];
+
+    if (waitlistLines.length > 0) {
+        newFields.push({
+            name: '\n**Waitlist:**',
+            value: waitlistLines.join('\n'),
+            inline: false
+        });
+    }
+
+    if (raidIdField) {
+        newFields.push(raidIdField);
+    }
+    if (statusField) {
+        newFields.push(statusField);
+    }
+
+    embed.data.fields = newFields;
+    await message.edit({ embeds: [embed] });
+}
+
 function isRaidFull(raidData) {
-    if (raidData.type === 'museum') {
+    if (raidData.type === 'museum' || raidData.type === 'key') {
         const maxSlots = raidData.maxSlots || raidData.signups.length;
         return raidData.signups.length >= maxSlots;
     }
@@ -418,11 +497,13 @@ function findRaidByIdInGuild(guild, raidId) {
 module.exports = {
     getRaidSignupChannel,
     getMuseumSignupChannel,
+    getKeySignupChannel,
     getChannelForRaid,
     fetchRaidMessage,
     parseDateTimeToTimestamp,
     updateRaidEmbed,
     updateMuseumEmbed,
+    updateKeyEmbed,
     findRaidByIdInGuild,
     closeRaidSignup,
     reopenRaidSignup,

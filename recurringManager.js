@@ -8,6 +8,7 @@ const { templatesForGuild, deriveSlug } = require('./templatesManager');
 const { raidChannels, museumChannels, setActiveRaid, getActiveRaid, getGuildSettings } = require('./state');
 const { EmbedBuilder } = require('discord.js');
 const chrono = require('chrono-node');
+const { generateTimestampedId } = require('./utils/idGenerator');
 
 // In-memory cache
 const recurringRaids = new Map(); // id -> recurring data
@@ -119,7 +120,7 @@ function rowToRecurring(row) {
 }
 
 function generateId() {
-    return `rec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    return generateTimestampedId('rec', 4);
 }
 
 function createRecurringRaid(data) {

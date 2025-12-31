@@ -5,8 +5,38 @@ const { recordRaidAnalytics, decrementRaidAnalytics } = require('./analytics');
 const { sendAuditLog } = require('../auditLog');
 const { buildLabelsForRaid } = require('./userLabels');
 
-async function getRaidSignupChannel(guild) {
-    const configuredChannelId = raidChannels.get(guild.id);
+// Channel configuration for different signup types
+const CHANNEL_CONFIG = {
+    raid: {
+        map: raidChannels,
+        names: ['raid-signups', 'raid signups']
+    },
+    museum: {
+        map: museumChannels,
+        names: ['museum-signups', 'museum signups'],
+        fallback: 'raid'
+    },
+    key: {
+        map: keyChannels,
+        names: ['key-signups', 'key signups', 'key-boss'],
+        fallback: 'raid'
+    }
+};
+
+/**
+ * Get the signup channel for a specific type (raid/museum/key)
+ * @param {Guild} guild - Discord guild
+ * @param {string} type - Channel type ('raid', 'museum', or 'key')
+ * @returns {Promise<Channel|null>} The signup channel or null
+ */
+async function getSignupChannel(guild, type) {
+    const config = CHANNEL_CONFIG[type];
+    if (!config) {
+        throw new Error(`Invalid signup channel type: ${type}`);
+    }
+
+    // Check configured channel first
+    const configuredChannelId = config.map.get(guild.id);
     if (configuredChannelId) {
         const channel = await fetchChannelById(guild, configuredChannelId);
         if (channel) {
@@ -14,52 +44,34 @@ async function getRaidSignupChannel(guild) {
         }
     }
 
-    return guild.channels.cache.find(
-        (ch) => ch.type === ChannelType.GuildText &&
-            (ch.name === 'raid-signups' || ch.name === 'raid signups')
-    ) || null;
+    // Try to find by name
+    const channelByName = guild.channels.cache.find(
+        (ch) => ch.type === ChannelType.GuildText && config.names.includes(ch.name)
+    );
+
+    if (channelByName) {
+        return channelByName;
+    }
+
+    // Use fallback if specified
+    if (config.fallback) {
+        return getSignupChannel(guild, config.fallback);
+    }
+
+    return null;
+}
+
+// Backward compatibility wrappers
+async function getRaidSignupChannel(guild) {
+    return getSignupChannel(guild, 'raid');
 }
 
 async function getMuseumSignupChannel(guild) {
-    const configuredChannelId = museumChannels.get(guild.id);
-    if (configuredChannelId) {
-        const channel = await fetchChannelById(guild, configuredChannelId);
-        if (channel) {
-            return channel;
-        }
-    }
-
-    const fallback = guild.channels.cache.find(
-        (ch) => ch.type === ChannelType.GuildText &&
-            (ch.name === 'museum-signups' || ch.name === 'museum signups')
-    );
-
-    if (fallback) {
-        return fallback;
-    }
-
-    return getRaidSignupChannel(guild);
+    return getSignupChannel(guild, 'museum');
 }
 
 async function getKeySignupChannel(guild) {
-    const configuredChannelId = keyChannels.get(guild.id);
-    if (configuredChannelId) {
-        const channel = await fetchChannelById(guild, configuredChannelId);
-        if (channel) {
-            return channel;
-        }
-    }
-
-    const fallback = guild.channels.cache.find(
-        (ch) => ch.type === ChannelType.GuildText &&
-            (ch.name === 'key-signups' || ch.name === 'key signups')
-    );
-
-    if (fallback) {
-        return fallback;
-    }
-
-    return getRaidSignupChannel(guild);
+    return getSignupChannel(guild, 'key');
 }
 
 async function fetchChannelById(guild, channelId) {

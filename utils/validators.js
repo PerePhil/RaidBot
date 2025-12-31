@@ -191,6 +191,102 @@ function validateReminderDuration(seconds, options = {}) {
 }
 
 /**
+ * Validate timezone string.
+ * @param {string} timezone - Timezone string (e.g., "EST", "America/New_York")
+ * @returns {ValidationResult}
+ */
+function validateTimezone(timezone) {
+    if (!timezone || typeof timezone !== 'string') {
+        return { valid: true, value: '' }; // Optional field
+    }
+
+    const trimmed = timezone.trim();
+
+    // Check for reasonable length and valid characters
+    if (trimmed.length > 50) {
+        return { valid: false, error: 'Timezone must be 50 characters or less' };
+    }
+
+    // Prevent special characters that could break embeds
+    if (/[<>@#`*_~|]/.test(trimmed)) {
+        return { valid: false, error: 'Timezone contains invalid characters' };
+    }
+
+    return { valid: true, value: trimmed };
+}
+
+/**
+ * Validate days of week string.
+ * @param {string} days - Comma-separated days (e.g., "Mon, Tue, Wed")
+ * @returns {ValidationResult}
+ */
+function validateDays(days) {
+    if (!days || typeof days !== 'string') {
+        return { valid: true, value: '' }; // Optional field
+    }
+
+    const trimmed = days.trim();
+
+    if (trimmed.length > 100) {
+        return { valid: false, error: 'Days must be 100 characters or less' };
+    }
+
+    // Prevent special characters that could break embeds
+    if (/[<>@#`*_~|]/.test(trimmed)) {
+        return { valid: false, error: 'Days contains invalid characters' };
+    }
+
+    return { valid: true, value: trimmed };
+}
+
+/**
+ * Validate roles/preferences string.
+ * @param {string} roles - Comma-separated roles
+ * @returns {ValidationResult}
+ */
+function validateRoles(roles) {
+    if (!roles || typeof roles !== 'string') {
+        return { valid: true, value: '' }; // Optional field
+    }
+
+    const trimmed = roles.trim();
+
+    if (trimmed.length > 200) {
+        return { valid: false, error: 'Roles must be 200 characters or less' };
+    }
+
+    // Prevent special characters that could break embeds
+    if (/[<>@#`*_~|]/.test(trimmed)) {
+        return { valid: false, error: 'Roles contains invalid characters' };
+    }
+
+    return { valid: true, value: trimmed };
+}
+
+/**
+ * Sanitize generic text input for safe storage and display.
+ * @param {string} input - Text input to sanitize
+ * @param {number} maxLength - Maximum length (default: 2000)
+ * @returns {string}
+ */
+function sanitizeInput(input, maxLength = 2000) {
+    if (!input || typeof input !== 'string') {
+        return '';
+    }
+
+    return input
+        // Remove Discord mentions
+        .replace(/<[@#&!]?\d+>/g, '')
+        // Remove zero-width characters
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        // Collapse multiple spaces
+        .replace(/\s+/g, ' ')
+        // Trim and limit length
+        .trim()
+        .slice(0, maxLength);
+}
+
+/**
  * Batch validate multiple inputs.
  * @param {Object} inputs - Object with input values
  * @param {Object} validators - Object with validator configs
@@ -224,5 +320,9 @@ module.exports = {
     sanitizeDisplayName,
     validateTemplateType,
     validateReminderDuration,
+    validateTimezone,
+    validateDays,
+    validateRoles,
+    sanitizeInput,
     validateBatch
 };

@@ -205,6 +205,13 @@ async function assignSignup(interaction) {
 
     const { messageId, raidData } = result;
 
+    if (raidData.closed) {
+        return interaction.reply({
+            content: 'Cannot assign users to a closed raid. Reopen it first with `/raid`.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
     if (raidData.type === 'museum') {
         if (raidData.signups.includes(user.id)) {
             return interaction.reply({

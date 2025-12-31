@@ -35,6 +35,11 @@ function loadConfig() {
             .filter(Boolean);
     }
 
+    // Restricted server message
+    const restrictedMessage = process.env.RESTRICTED_MESSAGE ||
+        fileConfig.restrictedMessage ||
+        'This bot is not authorized for this server.';
+
     if (!clientId || !token) {
         console.error('Missing required config: clientId and token must be set via environment variables or config.json');
         process.exit(1);
@@ -43,7 +48,8 @@ function loadConfig() {
     return {
         clientId,
         token,
-        allowedGuildIds
+        allowedGuildIds,
+        restrictedMessage
     };
 }
 

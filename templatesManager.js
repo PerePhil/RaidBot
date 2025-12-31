@@ -1,5 +1,6 @@
 const baseTemplates = require('./templates');
 const { db, prepare } = require('./db/database');
+const { generateTimestampedId } = require('./utils/idGenerator');
 
 // Prepared statements
 let statements = null;
@@ -110,7 +111,7 @@ function updateGuildTemplateOverrides(guildId, templateId, overrideData, options
 
 function addCustomTemplate(guildId, templateData) {
     const stmts = getStatements();
-    const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = generateTimestampedId('custom', 4);
 
     const template = {
         id,

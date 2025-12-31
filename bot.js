@@ -134,12 +134,36 @@ client.on('interactionCreate', async (interaction) => {
         try {
             const { MessageFlags } = require('discord.js');
             const { setAvailability, getAvailability, parseTimezone } = require('./availabilityManager');
+            const { validateTimezone, validateDays, validateRoles, sanitizeInput } = require('./utils/validators');
+
+            // Validate inputs
+            const timezoneInput = interaction.fields.getTextInputValue('timezone') || '';
+            const daysInput = interaction.fields.getTextInputValue('days') || '';
+            const rolesInput = interaction.fields.getTextInputValue('roles') || '';
+            const notesInput = interaction.fields.getTextInputValue('notes') || '';
+
+            const timezoneResult = validateTimezone(timezoneInput);
+            const daysResult = validateDays(daysInput);
+            const rolesResult = validateRoles(rolesInput);
+
+            // Check for validation errors
+            const errors = [];
+            if (!timezoneResult.valid) errors.push(timezoneResult.error);
+            if (!daysResult.valid) errors.push(daysResult.error);
+            if (!rolesResult.valid) errors.push(rolesResult.error);
+
+            if (errors.length > 0) {
+                return interaction.reply({
+                    content: `Validation errors:\n${errors.map(e => `• ${e}`).join('\n')}`,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
 
             const data = {
-                timezone: (interaction.fields.getTextInputValue('timezone') || '').trim(),
-                days: (interaction.fields.getTextInputValue('days') || '').trim(),
-                roles: (interaction.fields.getTextInputValue('roles') || '').trim(),
-                notes: (interaction.fields.getTextInputValue('notes') || '').trim()
+                timezone: timezoneResult.value,
+                days: daysResult.value,
+                roles: rolesResult.value,
+                notes: sanitizeInput(notesInput, 500)
             };
             setAvailability(interaction.guildId, interaction.user.id, data);
 
@@ -193,7 +217,7 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.guildId && !isGuildAllowed(interaction.guildId)) {
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({
-                content: 'This bot is restricted to IOP and cannot be used in this server.',
+                content: config.restrictedMessage,
                 ephemeral: true
             }).catch(() => { });
         }

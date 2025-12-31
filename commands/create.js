@@ -21,6 +21,7 @@ const {
 } = require('../utils/raidHelpers');
 const { updateBotPresence } = require('../presence');
 const { templatesForGuild } = require('../templatesManager');
+const { generateId } = require('../utils/idGenerator');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -599,5 +600,5 @@ function buildRoleGroups(template, strategy) {
 }
 
 function generateRaidId() {
-    return Math.random().toString(36).substr(2, 6).toUpperCase();
+    return generateId('', 6);
 }

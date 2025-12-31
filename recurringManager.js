@@ -29,13 +29,13 @@ function getStatements() {
                 id, guild_id, channel_id, template_slug, template_data,
                 schedule_type, day_of_week, time_of_day, interval_hours, timezone,
                 length, strategy, copy_participants, advance_hours,
-                spawn_day_of_week, spawn_time_of_day,
+                spawn_day_of_week, spawn_time_of_day, mention_role_id,
                 creator_id, enabled, next_scheduled_at, created_at
             ) VALUES (
                 @id, @guild_id, @channel_id, @template_slug, @template_data,
                 @schedule_type, @day_of_week, @time_of_day, @interval_hours, @timezone,
                 @length, @strategy, @copy_participants, @advance_hours,
-                @spawn_day_of_week, @spawn_time_of_day,
+                @spawn_day_of_week, @spawn_time_of_day, @mention_role_id,
                 @creator_id, @enabled, @next_scheduled_at, unixepoch()
             )
         `),
@@ -56,6 +56,7 @@ function getStatements() {
                 advance_hours = @advance_hours,
                 spawn_day_of_week = @spawn_day_of_week,
                 spawn_time_of_day = @spawn_time_of_day,
+                mention_role_id = @mention_role_id,
                 enabled = @enabled,
                 next_scheduled_at = @next_scheduled_at
             WHERE id = @id
@@ -107,6 +108,7 @@ function rowToRecurring(row) {
         advanceHours: row.advance_hours || 0,
         spawnDayOfWeek: row.spawn_day_of_week,     // Custom spawn day (null = same as raid)
         spawnTimeOfDay: row.spawn_time_of_day,     // Custom spawn time (null = same as raid)
+        mentionRoleId: row.mention_role_id,        // Role to mention when signup is created
         creatorId: row.creator_id,
         enabled: row.enabled === 1,
         lastCreatedAt: row.last_created_at,
@@ -142,6 +144,7 @@ function createRecurringRaid(data) {
         advance_hours: data.advanceHours ?? 0,
         spawn_day_of_week: data.spawnDayOfWeek ?? null,
         spawn_time_of_day: data.spawnTimeOfDay || null,
+        mention_role_id: data.mentionRoleId || null,
         creator_id: data.creatorId,
         enabled: 1,
         next_scheduled_at: nextScheduledAt
@@ -186,6 +189,7 @@ function updateRecurringRaid(id, updates) {
         advance_hours: merged.advanceHours ?? 0,
         spawn_day_of_week: merged.spawnDayOfWeek ?? null,
         spawn_time_of_day: merged.spawnTimeOfDay || null,
+        mention_role_id: merged.mentionRoleId || null,
         enabled: merged.enabled ? 1 : 0,
         next_scheduled_at: nextScheduledAt
     });
@@ -565,7 +569,14 @@ async function spawnRaidFromRecurring(client, recurring) {
 
     let message;
     try {
-        message = await channel.send({ embeds: [embed] });
+        // Build message content with optional role mention
+        const content = recurring.mentionRoleId ? `<@&${recurring.mentionRoleId}>` : undefined;
+
+        message = await channel.send({
+            content,
+            embeds: [embed],
+            allowedMentions: { roles: recurring.mentionRoleId ? [recurring.mentionRoleId] : [] }
+        });
 
         // Add reactions for museum or raid roles
         if (isMuseum) {

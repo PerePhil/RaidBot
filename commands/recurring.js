@@ -66,6 +66,7 @@ module.exports = {
                 .addChoices(
                     { name: 'create', value: 'create' },
                     { name: 'list', value: 'list' },
+                    { name: 'edit', value: 'edit' },
                     { name: 'delete', value: 'delete' },
                     { name: 'toggle', value: 'toggle' },
                     { name: 'trigger', value: 'trigger' }
@@ -84,6 +85,8 @@ module.exports = {
             return startCreateFlow(interaction);
         } else if (action === 'list') {
             return listRecurring(interaction);
+        } else if (action === 'edit') {
+            return startEditFlow(interaction, id);
         } else if (action === 'delete') {
             return handleDelete(interaction, id);
         } else if (action === 'toggle') {
@@ -216,7 +219,16 @@ async function handleCreateStep(interaction, state, collector) {
     }
     else if (interaction.customId === 'recurring_copy') {
         state.copyParticipants = interaction.values[0] === 'yes';
-        await finishCreate(interaction, state, collector);
+        await showMentionRoleOption(interaction, state, collector);
+    }
+    else if (interaction.customId === 'recurring_mention_role') {
+        const choice = interaction.values[0];
+        if (choice === 'yes') {
+            await showMentionRoleModal(interaction, state, collector);
+        } else {
+            state.mentionRoleId = null;
+            await finishCreate(interaction, state, collector);
+        }
     }
 }
 
@@ -349,10 +361,74 @@ async function showCopyOption(interaction, state, collector) {
     // Handle both update and reply depending on interaction type
     const replyFn = interaction.replied || interaction.deferred ? 'followUp' : 'reply';
     await interaction[replyFn]({
-        content: '**Create Recurring Raid** (Step 6/6)\\nCopy participants from previous instance?',
+        content: '**Create Recurring Raid** (Step 6/7)\nCopy participants from previous instance?',
         components: [row],
         flags: MessageFlags.Ephemeral
     });
+}
+
+async function showMentionRoleOption(interaction, state, collector) {
+    const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('recurring_mention_role')
+            .setPlaceholder('Mention a role when signup appears?')
+            .addOptions([
+                { label: 'Yes', value: 'yes', description: 'Tag a role when signups are posted' },
+                { label: 'No', value: 'no', description: 'No role mention' }
+            ])
+    );
+
+    // Handle both update and reply depending on interaction type
+    const replyFn = interaction.replied || interaction.deferred ? 'followUp' : 'reply';
+    await interaction[replyFn]({
+        content: '**Create Recurring Raid** (Step 7/7)\nDo you want to mention a role when signups appear?',
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
+}
+
+async function showMentionRoleModal(interaction, state, collector) {
+    const modal = new ModalBuilder()
+        .setCustomId('recurring_mention_role_modal')
+        .setTitle('Role to Mention')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('role_id')
+                    .setLabel('Role ID (right-click role, Copy ID)')
+                    .setPlaceholder('123456789012345678')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            )
+        );
+
+    await interaction.showModal(modal);
+
+    try {
+        const modalSubmit = await interaction.awaitModalSubmit({
+            filter: i => i.customId === 'recurring_mention_role_modal' && i.user.id === interaction.user.id,
+            time: 120000
+        });
+
+        const roleId = modalSubmit.fields.getTextInputValue('role_id').trim();
+
+        // Validate it's a valid snowflake ID
+        if (!/^\d{17,20}$/.test(roleId)) {
+            await modalSubmit.reply({
+                content: '❌ Invalid role ID. Please provide a valid Discord role ID (numbers only).',
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        state.mentionRoleId = roleId;
+        await modalSubmit.deferUpdate();
+        await finishCreate(interaction, state, collector);
+    } catch (error) {
+        if (error.code !== 'InteractionCollectorError') {
+            console.error('Modal error:', error);
+        }
+    }
 }
 
 async function showIntervalModal(interaction, state, collector) {
@@ -424,6 +500,7 @@ async function finishCreate(interaction, state, collector) {
         advanceHours: 0,
         spawnDayOfWeek: state.spawnDayOfWeek,       // Custom spawn day (null = same as raid)
         spawnTimeOfDay: state.spawnTimeOfDay,       // Custom spawn time (null = same as raid)
+        mentionRoleId: state.mentionRoleId,         // Role to mention when signup appears
         creatorId: state.creatorId
     });
 
@@ -577,5 +654,311 @@ async function handleTrigger(interaction, id) {
         await interaction.editReply({
             content: '❌ Failed to spawn raid: ' + error.message
         });
+    }
+}
+
+async function startEditFlow(interaction, id) {
+    if (!id) {
+        return interaction.reply({
+            content: 'Please provide an ID when using `action: edit`. Use `/recurring action:list` to see available IDs.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const guildId = interaction.guildId;
+    const recurring = getRecurringRaid(id);
+
+    if (!recurring || recurring.guildId !== guildId) {
+        return interaction.reply({
+            content: `Recurring raid \`${id}\` not found. Use \`/recurring action:list\` to see available IDs.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('recurring_edit_choice')
+            .setPlaceholder('What do you want to edit?')
+            .addOptions([
+                { label: 'Raid Time', value: 'raid_time', description: 'Change when the raid occurs', emoji: '⏰' },
+                { label: 'Spawn Time', value: 'spawn_time', description: 'Change when signup appears', emoji: '📅' },
+                { label: 'Role Mention', value: 'role_mention', description: 'Add/change/remove role mention', emoji: '📢' }
+            ])
+    );
+
+    const templates = templatesForGuild(guildId);
+    const template = templates.find(t => t.slug === recurring.templateSlug || t.id === recurring.templateSlug);
+    const templateName = template?.name || (recurring.templateSlug === 'museum' ? 'Museum' : recurring.templateSlug);
+    const scheduleDesc = formatScheduleDescription(recurring);
+
+    const embed = new EmbedBuilder()
+        .setTitle(`Edit Recurring Raid: ${templateName}`)
+        .setColor(0x5865F2)
+        .addFields(
+            { name: 'Current Schedule', value: scheduleDesc, inline: false },
+            { name: 'ID', value: `\`${id}\``, inline: true }
+        );
+
+    await interaction.reply({
+        embeds: [embed],
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
+
+    const collector = interaction.channel.createMessageComponentCollector({
+        filter: i => i.user.id === interaction.user.id && i.customId.startsWith('recurring_edit'),
+        time: 300000
+    });
+
+    const editState = { recurring, id };
+
+    collector.on('collect', async i => {
+        try {
+            await handleEditStep(i, editState, collector);
+        } catch (error) {
+            console.error('Error in recurring edit flow:', error);
+            await i.reply({ content: 'An error occurred. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+    });
+
+    collector.on('end', (_, reason) => {
+        if (reason === 'time') {
+            interaction.editReply({ content: 'Edit timed out.', components: [], embeds: [] }).catch(() => {});
+        }
+    });
+}
+
+async function handleEditStep(interaction, state, collector) {
+    if (interaction.customId === 'recurring_edit_choice') {
+        const choice = interaction.values[0];
+
+        if (choice === 'raid_time') {
+            await showRaidTimeEditModal(interaction, state, collector);
+        } else if (choice === 'spawn_time') {
+            await showSpawnTimeEditModal(interaction, state, collector);
+        } else if (choice === 'role_mention') {
+            await showRoleMentionEditModal(interaction, state, collector);
+        }
+    }
+}
+
+async function showRaidTimeEditModal(interaction, state, collector) {
+    const modal = new ModalBuilder()
+        .setCustomId('recurring_edit_raid_time_modal')
+        .setTitle('Edit Raid Time')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('time')
+                    .setLabel('Time (e.g., 7pm, 7:00 PM, 19:00)')
+                    .setPlaceholder(state.recurring.timeOfDay || '7pm')
+                    .setValue(state.recurring.timeOfDay || '')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            )
+        );
+
+    // Add day field for weekly raids
+    if (state.recurring.scheduleType === 'weekly') {
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('day')
+                    .setLabel('Day of week (0-6, or name like Monday)')
+                    .setPlaceholder('1 (Monday)')
+                    .setValue(state.recurring.dayOfWeek?.toString() || '')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(false)
+            )
+        );
+    }
+
+    await interaction.showModal(modal);
+
+    try {
+        const modalSubmit = await interaction.awaitModalSubmit({
+            filter: i => i.customId === 'recurring_edit_raid_time_modal' && i.user.id === interaction.user.id,
+            time: 120000
+        });
+
+        const newTime = modalSubmit.fields.getTextInputValue('time');
+        const updates = {
+            timeOfDay: newTime
+        };
+
+        if (state.recurring.scheduleType === 'weekly') {
+            const dayInput = modalSubmit.fields.getTextInputValue('day');
+            if (dayInput) {
+                const dayNum = parseDayOfWeek(dayInput);
+                if (dayNum !== null) {
+                    updates.dayOfWeek = dayNum;
+                }
+            }
+        }
+
+        const updated = updateRecurringRaid(state.id, updates);
+
+        if (updated) {
+            const scheduleDesc = formatScheduleDescription(updated);
+            await modalSubmit.reply({
+                content: `✅ Raid time updated!\n\nNew schedule: ${scheduleDesc}`,
+                flags: MessageFlags.Ephemeral
+            });
+            collector.stop('completed');
+        } else {
+            await modalSubmit.reply({
+                content: '❌ Failed to update raid time.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+    } catch (error) {
+        if (error.code !== 'InteractionCollectorError') {
+            console.error('Modal error:', error);
+        }
+    }
+}
+
+async function showSpawnTimeEditModal(interaction, state, collector) {
+    const modal = new ModalBuilder()
+        .setCustomId('recurring_edit_spawn_time_modal')
+        .setTitle('Edit Spawn Time')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('spawn_time')
+                    .setLabel('Spawn time (e.g., 10am, 10:00)')
+                    .setPlaceholder('10am')
+                    .setValue(state.recurring.spawnTimeOfDay || '')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(false)
+            ),
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('spawn_day')
+                    .setLabel('Spawn day (0-6, or name like Monday)')
+                    .setPlaceholder('Leave blank for same as raid day')
+                    .setValue(state.recurring.spawnDayOfWeek?.toString() || '')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(false)
+            )
+        );
+
+    await interaction.showModal(modal);
+
+    try {
+        const modalSubmit = await interaction.awaitModalSubmit({
+            filter: i => i.customId === 'recurring_edit_spawn_time_modal' && i.user.id === interaction.user.id,
+            time: 120000
+        });
+
+        const spawnTimeInput = modalSubmit.fields.getTextInputValue('spawn_time');
+        const spawnDayInput = modalSubmit.fields.getTextInputValue('spawn_day');
+
+        const updates = {};
+
+        if (spawnTimeInput) {
+            updates.spawnTimeOfDay = spawnTimeInput;
+        }
+
+        if (spawnDayInput) {
+            const dayNum = parseDayOfWeek(spawnDayInput);
+            if (dayNum !== null) {
+                updates.spawnDayOfWeek = dayNum;
+            }
+        } else {
+            // User cleared the field - set to null to use raid time
+            updates.spawnDayOfWeek = null;
+        }
+
+        const updated = updateRecurringRaid(state.id, updates);
+
+        if (updated) {
+            const scheduleDesc = formatScheduleDescription(updated);
+            await modalSubmit.reply({
+                content: `✅ Spawn time updated!\n\nNew schedule: ${scheduleDesc}`,
+                flags: MessageFlags.Ephemeral
+            });
+            collector.stop('completed');
+        } else {
+            await modalSubmit.reply({
+                content: '❌ Failed to update spawn time.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+    } catch (error) {
+        if (error.code !== 'InteractionCollectorError') {
+            console.error('Modal error:', error);
+        }
+    }
+}
+
+async function showRoleMentionEditModal(interaction, state, collector) {
+    const currentRoleId = state.recurring.mentionRoleId || '';
+    const currentRoleText = currentRoleId ? `Current: ${currentRoleId}` : 'Currently: No role mention';
+
+    const modal = new ModalBuilder()
+        .setCustomId('recurring_edit_role_mention_modal')
+        .setTitle('Edit Role Mention')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('role_id')
+                    .setLabel('Role ID (leave blank to remove mention)')
+                    .setPlaceholder('Right-click role → Copy ID, or leave blank')
+                    .setValue(currentRoleId)
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(false)
+            )
+        );
+
+    await interaction.showModal(modal);
+
+    try {
+        const modalSubmit = await interaction.awaitModalSubmit({
+            filter: i => i.customId === 'recurring_edit_role_mention_modal' && i.user.id === interaction.user.id,
+            time: 120000
+        });
+
+        const roleIdInput = modalSubmit.fields.getTextInputValue('role_id').trim();
+
+        const updates = {};
+
+        if (roleIdInput) {
+            // Validate it's a valid snowflake ID
+            if (!/^\d{17,20}$/.test(roleIdInput)) {
+                await modalSubmit.reply({
+                    content: '❌ Invalid role ID. Please provide a valid Discord role ID (numbers only), or leave blank to remove mention.',
+                    flags: MessageFlags.Ephemeral
+                });
+                return;
+            }
+            updates.mentionRoleId = roleIdInput;
+        } else {
+            // User cleared the field - remove role mention
+            updates.mentionRoleId = null;
+        }
+
+        const updated = updateRecurringRaid(state.id, updates);
+
+        if (updated) {
+            const roleStatus = updates.mentionRoleId
+                ? `will now mention <@&${updates.mentionRoleId}>`
+                : 'will no longer mention a role';
+
+            await modalSubmit.reply({
+                content: `✅ Role mention updated!\n\nSignups ${roleStatus}.`,
+                flags: MessageFlags.Ephemeral
+            });
+            collector.stop('completed');
+        } else {
+            await modalSubmit.reply({
+                content: '❌ Failed to update role mention.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+    } catch (error) {
+        if (error.code !== 'InteractionCollectorError') {
+            console.error('Modal error:', error);
+        }
     }
 }

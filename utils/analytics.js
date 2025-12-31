@@ -140,9 +140,45 @@ function recordRaidAnalytics(raidData) {
 }
 
 /**
+ * Decrement analytics for removed participants.
+ * Used when participation is removed after a raid was closed.
+ * @param {Array} participants - Array of {userId} objects
+ * @param {Object} raidData - The raid data
+ */
+function decrementRaidAnalytics(participants, raidData) {
+    if (!participants || participants.length === 0 || !raidData) return;
+
+    const guildId = raidData.guildId;
+    const timestamp = raidData.timestamp ? raidData.timestamp * 1000 : Date.now();
+    const weekKey = getWeekKey(new Date(timestamp));
+    const monthKey = getMonthKey(new Date(timestamp));
+
+    // Decrement global stats
+    analyticsData.global.totalSignups = Math.max(0, analyticsData.global.totalSignups - participants.length);
+
+    // Decrement guild stats
+    if (guildId) {
+        ensureGuildAnalytics(guildId);
+        const guild = analyticsData.guilds[guildId];
+
+        guild.totalSignups = Math.max(0, guild.totalSignups - participants.length);
+
+        // Decrement per-user stats
+        participants.forEach(({ userId }) => {
+            if (guild.userStats[userId]) {
+                guild.userStats[userId].signups = Math.max(0, guild.userStats[userId].signups - 1);
+                guild.userStats[userId].attended = Math.max(0, guild.userStats[userId].attended - 1);
+            }
+        });
+    }
+
+    saveAnalytics();
+}
+
+/**
  * Get attendance rate for a user
- * @param {string} guildId 
- * @param {string} userId 
+ * @param {string} guildId
+ * @param {string} userId
  * @returns {number} Attendance rate 0-1
  */
 function getAttendanceRate(guildId, userId) {
@@ -305,6 +341,7 @@ module.exports = {
     loadAnalytics,
     saveAnalytics,
     recordRaidAnalytics,
+    decrementRaidAnalytics,
     getAttendanceRate,
     getNoShowRate,
     generateWeeklyReport,

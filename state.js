@@ -736,6 +736,36 @@ function getGuildUserStats(guildId, userId) {
     return { ...defaults, ...(existing || {}) };
 }
 
+/**
+ * Extract all user IDs and their roles from raid data
+ * @param {Object} raidData - The raid data object
+ * @returns {Array} Array of {userId, roleName} objects
+ */
+function extractRaidParticipants(raidData) {
+    if (!raidData || !raidData.signups) return [];
+
+    const participants = [];
+    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (raidData.type === 'key' ? 'Key Boss' : 'Raid'));
+
+    if (raidData.type === 'museum') {
+        raidData.signups.forEach((userId) => {
+            participants.push({ userId, roleName: 'Museum' });
+        });
+    } else if (raidData.type === 'key') {
+        raidData.signups.forEach((userId) => {
+            participants.push({ userId, roleName: 'Key Boss' });
+        });
+    } else {
+        raidData.signups.forEach((role) => {
+            role.users.forEach((userId) => {
+                participants.push({ userId, roleName: role.name });
+            });
+        });
+    }
+
+    return participants;
+}
+
 function recordRaidStats(raidData) {
     if (!raidData || !raidData.signups) return;
     const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : 'Raid');
@@ -808,6 +838,94 @@ function recordRaidStats(raidData) {
             role.users.forEach((userId) => incrementUser(userId, role.name));
         });
     }
+}
+
+/**
+ * Decrement raid stats for a specific user/role.
+ * Used when removing participation credit after a raid was closed.
+ * @param {string} userId - The user ID
+ * @param {string} roleName - The role name
+ * @param {string} type - The raid type (template name or 'Museum Signup'/'Key Boss')
+ * @param {string} guildId - The guild ID
+ * @param {number} timestamp - The raid timestamp
+ */
+function decrementUserStats(userId, roleName, type, guildId, timestamp) {
+    if (!userId) return;
+
+    const weekday = timestamp ? new Date(timestamp).getDay() : null;
+    const stmts = getStatements();
+
+    // Decrement global stats
+    const stats = getUserStats(userId);
+    if (stats.totalRaids > 0) {
+        stats.totalRaids -= 1;
+        stats.roleCounts[roleName] = Math.max(0, (stats.roleCounts[roleName] || 0) - 1);
+        stats.templateCounts[type] = Math.max(0, (stats.templateCounts[type] || 0) - 1);
+        if (weekday !== null) {
+            stats.weekdayCounts[weekday] = Math.max(0, (stats.weekdayCounts[weekday] || 0) - 1);
+        }
+        stats.lastUpdated = Date.now();
+        raidStats.set(userId, stats);
+
+        // Persist to database
+        stmts.upsertUserStats.run({
+            user_id: userId,
+            total_raids: stats.totalRaids,
+            role_counts: JSON.stringify(stats.roleCounts),
+            template_counts: JSON.stringify(stats.templateCounts),
+            weekday_counts: JSON.stringify(stats.weekdayCounts),
+            last_updated: stats.lastUpdated,
+            last_raid_at: stats.lastRaidAt
+        });
+    }
+
+    // Decrement guild stats
+    if (guildId) {
+        const guildStats = getGuildUserStats(guildId, userId);
+        if (guildStats.totalRaids > 0) {
+            guildStats.totalRaids -= 1;
+            guildStats.roleCounts[roleName] = Math.max(0, (guildStats.roleCounts[roleName] || 0) - 1);
+            guildStats.templateCounts[type] = Math.max(0, (guildStats.templateCounts[type] || 0) - 1);
+            if (weekday !== null) {
+                guildStats.weekdayCounts[weekday] = Math.max(0, (guildStats.weekdayCounts[weekday] || 0) - 1);
+            }
+            guildStats.lastUpdated = Date.now();
+
+            if (!guildParticipation.has(guildId)) {
+                guildParticipation.set(guildId, new Map());
+            }
+            guildParticipation.get(guildId).set(userId, guildStats);
+
+            // Persist to database
+            stmts.upsertGuildUserStats.run({
+                guild_id: guildId,
+                user_id: userId,
+                total_raids: guildStats.totalRaids,
+                role_counts: JSON.stringify(guildStats.roleCounts),
+                template_counts: JSON.stringify(guildStats.templateCounts),
+                weekday_counts: JSON.stringify(guildStats.weekdayCounts),
+                last_updated: guildStats.lastUpdated,
+                last_raid_at: guildStats.lastRaidAt
+            });
+        }
+    }
+}
+
+/**
+ * Decrement stats for removed participants.
+ * @param {Array} participants - Array of {userId, roleName} objects
+ * @param {Object} raidData - The raid data object
+ */
+function decrementRaidStats(participants, raidData) {
+    if (!participants || participants.length === 0) return;
+
+    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (raidData.type === 'key' ? 'Key Boss' : 'Raid'));
+    const timestamp = raidData.timestamp ? raidData.timestamp * 1000 : null;
+    const guildId = raidData.guildId;
+
+    participants.forEach(({ userId, roleName }) => {
+        decrementUserStats(userId, roleName, type, guildId, timestamp);
+    });
 }
 
 /**
@@ -950,6 +1068,8 @@ module.exports = {
     updateGuildSettings,
     loadRaidStats,
     recordRaidStats,
+    decrementRaidStats,
+    extractRaidParticipants,
     recordUserActivity,
     getUserStats,
     getGuildUserStats,

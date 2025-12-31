@@ -1,7 +1,7 @@
 const chrono = require('chrono-node');
 const { EmbedBuilder, ChannelType } = require('discord.js');
-const { activeRaids, raidChannels, museumChannels, keyChannels, recordRaidStats, getGuildSettings } = require('../state');
-const { recordRaidAnalytics } = require('./analytics');
+const { activeRaids, raidChannels, museumChannels, keyChannels, recordRaidStats, decrementRaidStats, extractRaidParticipants, getGuildSettings } = require('../state');
+const { recordRaidAnalytics, decrementRaidAnalytics } = require('./analytics');
 const { sendAuditLog } = require('../auditLog');
 const { buildLabelsForRaid } = require('./userLabels');
 
@@ -384,10 +384,59 @@ async function closeRaidSignup(message, raidData, options = {}) {
     raidData.closedBy = closedByUserId;
     raidData.closedAt = now;
     raidData.closedReason = reason;
+
+    // Smart delta tracking for stats
     if (!raidData.statsRecorded) {
+        // First close: record stats normally and save snapshot
         recordRaidStats(raidData);
-        recordRaidAnalytics(raidData);  // Option B: all signups counted as attended
+        recordRaidAnalytics(raidData);
         raidData.statsRecorded = true;
+        raidData.statsSnapshot = extractRaidParticipants(raidData);
+    } else if (raidData.statsSnapshot) {
+        // Subsequent close after reopen: do delta tracking
+        const currentParticipants = extractRaidParticipants(raidData);
+        const snapshotMap = new Map(raidData.statsSnapshot.map(p => [`${p.userId}:${p.roleName}`, p]));
+        const currentMap = new Map(currentParticipants.map(p => [`${p.userId}:${p.roleName}`, p]));
+
+        // Find removed participants (in snapshot but not in current)
+        const removed = raidData.statsSnapshot.filter(p => !currentMap.has(`${p.userId}:${p.roleName}`));
+
+        // Find added participants (in current but not in snapshot)
+        const added = currentParticipants.filter(p => !snapshotMap.has(`${p.userId}:${p.roleName}`));
+
+        // Decrement stats for removed participants
+        if (removed.length > 0) {
+            decrementRaidStats(removed, raidData);
+            decrementRaidAnalytics(removed, raidData);
+        }
+
+        // Increment stats for added participants
+        if (added.length > 0) {
+            // Create a temporary raidData with only the added participants
+            const addedRaidData = { ...raidData };
+            if (raidData.type === 'museum' || raidData.type === 'key') {
+                addedRaidData.signups = added.map(p => p.userId);
+            } else {
+                // For regular raids, reconstruct the signups structure with only added users
+                const roleMap = new Map();
+                added.forEach(({ userId, roleName }) => {
+                    if (!roleMap.has(roleName)) {
+                        const originalRole = raidData.signups.find(r => r.name === roleName);
+                        roleMap.set(roleName, {
+                            ...originalRole,
+                            users: []
+                        });
+                    }
+                    roleMap.get(roleName).users.push(userId);
+                });
+                addedRaidData.signups = Array.from(roleMap.values());
+            }
+            recordRaidStats(addedRaidData);
+            recordRaidAnalytics(addedRaidData);
+        }
+
+        // Update snapshot to current participants
+        raidData.statsSnapshot = currentParticipants;
     }
 
     // Archive discussion thread if exists

@@ -65,6 +65,8 @@ function runMigrations() {
         { table: 'guilds', column: 'key_channel_id', sql: 'ALTER TABLE guilds ADD COLUMN key_channel_id TEXT' },
         // Optimistic locking support (added Dec 2024)
         { table: 'raids', column: 'version', sql: 'ALTER TABLE raids ADD COLUMN version INTEGER DEFAULT 1' },
+        // Recurring raid role mentions (added Dec 2024)
+        { table: 'recurring_raids', column: 'mention_role_id', sql: 'ALTER TABLE recurring_raids ADD COLUMN mention_role_id TEXT' },
     ];
 
     for (const migration of migrations) {

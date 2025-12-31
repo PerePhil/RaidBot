@@ -2,11 +2,22 @@ const { activeRaids, markActiveRaidUpdated, getSignupRoles, recordUserActivity }
 const { updateRaidEmbed, updateMuseumEmbed, updateKeyEmbed } = require('../utils/raidHelpers');
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
 const { reactionLimiter } = require('../utils/rateLimiter');
+const { Mutex } = require('async-mutex');
+
+// Per-raid mutex locks to prevent race conditions
+const locks = new Map(); // messageId -> Mutex
+
+function getLock(messageId) {
+    if (!locks.has(messageId)) {
+        locks.set(messageId, new Mutex());
+    }
+    return locks.get(messageId);
+}
 
 async function handleReactionAdd(reaction, user) {
     if (user.bot) return;
 
-    // Rate limit check
+    // Rate limit check (before acquiring lock to avoid blocking)
     if (!reactionLimiter.isAllowed(user.id)) {
         try {
             await reaction.users.remove(user.id);
@@ -22,6 +33,11 @@ async function handleReactionAdd(reaction, user) {
             await reaction.fetch();
         } catch (error) {
             console.error('Error fetching reaction:', error);
+            // Cleanup reaction on fetch failure
+            try {
+                await reaction.users.remove(user.id);
+                await safeDm(user, 'Your signup could not be processed. Please try again.');
+            } catch (e) { /* ignore cleanup errors */ }
             return;
         }
     }
@@ -29,91 +45,99 @@ async function handleReactionAdd(reaction, user) {
     const raidData = activeRaids.get(reaction.message.id);
     if (!raidData) return;
 
-    if (raidData.closed) {
-        await reaction.users.remove(user.id);
-        await safeDm(user, 'Signups for this raid are closed. Please contact a staff member if you need assistance.');
-        return;
-    }
+    // Acquire mutex lock for this specific raid
+    const lock = getLock(reaction.message.id);
+    const release = await lock.acquire();
 
-    const allowedCheck = await isAllowed(interactionGuild(reaction), user, raidData.type);
-
-    if (raidData.type === 'museum') {
-        if (!allowedCheck.allowed) {
+    try {
+        if (raidData.closed) {
             await reaction.users.remove(user.id);
-            await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'museum'));
+            await safeDm(user, 'Signups for this raid are closed. Please contact a staff member if you need assistance.');
             return;
         }
-        await handleMuseumReactionAdd(reaction, user, raidData);
-        return;
-    }
 
-    if (raidData.type === 'key') {
-        if (!allowedCheck.allowed) {
-            await reaction.users.remove(user.id);
-            await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'key boss'));
-            return;
-        }
-        await handleKeyReactionAdd(reaction, user, raidData);
-        return;
-    }
+        const allowedCheck = await isAllowed(interactionGuild(reaction), user, raidData.type);
 
-    if (!allowedCheck.allowed) {
-        await reaction.users.remove(user.id);
-        await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'raid'));
-        return;
-    }
-
-    const roleIndex = raidData.signups.findIndex((r) => r.emoji === reaction.emoji.name);
-    if (roleIndex === -1) return;
-
-    const role = raidData.signups[roleIndex];
-    role.waitlist = role.waitlist || [];
-    const alreadySignedUp = raidData.signups.some((r) => r.users.includes(user.id));
-
-    if (role.waitlist.includes(user.id)) {
-        await safeDm(user, `You're already on the waitlist for ${role.name} in this raid.`);
-        return;
-    }
-
-    if (alreadySignedUp) {
-        // Remove the reaction since they can't sign up for another role
-        try {
-            await reaction.users.remove(user.id);
-        } catch (error) {
-            // Ignore - reaction may already be removed
-        }
-        await safeDm(user, `You're already signed up for a role in this raid! Please remove your current signup before choosing a different role.`);
-        return;
-    }
-
-    if (role.users.length >= role.slots) {
-        if (!role.waitlist.includes(user.id)) {
-            role.waitlist.push(user.id);
-            // Record activity for waitlist signup (tracks as active but not as completed raid)
-            if (raidData.guildId) {
-                recordUserActivity(raidData.guildId, user.id);
+        if (raidData.type === 'museum') {
+            if (!allowedCheck.allowed) {
+                await reaction.users.remove(user.id);
+                await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'museum'));
+                return;
             }
+            await handleMuseumReactionAdd(reaction, user, raidData);
+            return;
         }
+
+        if (raidData.type === 'key') {
+            if (!allowedCheck.allowed) {
+                await reaction.users.remove(user.id);
+                await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'key boss'));
+                return;
+            }
+            await handleKeyReactionAdd(reaction, user, raidData);
+            return;
+        }
+
+        if (!allowedCheck.allowed) {
+            await reaction.users.remove(user.id);
+            await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'raid'));
+            return;
+        }
+
+        const roleIndex = raidData.signups.findIndex((r) => r.emoji === reaction.emoji.name);
+        if (roleIndex === -1) return;
+
+        const role = raidData.signups[roleIndex];
+        role.waitlist = role.waitlist || [];
+        const alreadySignedUp = raidData.signups.some((r) => r.users.includes(user.id));
+
+        if (role.waitlist.includes(user.id)) {
+            await safeDm(user, `You're already on the waitlist for ${role.name} in this raid.`);
+            return;
+        }
+
+        if (alreadySignedUp) {
+            // Remove the reaction since they can't sign up for another role
+            try {
+                await reaction.users.remove(user.id);
+            } catch (error) {
+                // Ignore - reaction may already be removed
+            }
+            await safeDm(user, `You're already signed up for a role in this raid! Please remove your current signup before choosing a different role.`);
+            return;
+        }
+
+        if (role.users.length >= role.slots) {
+            if (!role.waitlist.includes(user.id)) {
+                role.waitlist.push(user.id);
+                // Record activity for waitlist signup (tracks as active but not as completed raid)
+                if (raidData.guildId) {
+                    recordUserActivity(raidData.guildId, user.id);
+                }
+            }
+            await updateRaidEmbed(reaction.message, raidData);
+            markActiveRaidUpdated(reaction.message.id);
+            await safeDm(user, `The ${role.name} role is full. You've been added to the waitlist and will be notified when a spot opens.`);
+            return;
+        }
+
+        role.users.push(user.id);
         await updateRaidEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
-        await safeDm(user, `The ${role.name} role is full. You've been added to the waitlist and will be notified when a spot opens.`);
-        return;
-    }
 
-    role.users.push(user.id);
-    await updateRaidEmbed(reaction.message, raidData);
-    markActiveRaidUpdated(reaction.message.id);
+        const totalSlots = raidData.signups.reduce((sum, r) => sum + r.slots, 0);
+        const filledSlots = raidData.signups.reduce((sum, r) => sum + r.users.length, 0);
 
-    const totalSlots = raidData.signups.reduce((sum, r) => sum + r.slots, 0);
-    const filledSlots = raidData.signups.reduce((sum, r) => sum + r.users.length, 0);
-
-    if (filledSlots >= totalSlots) {
-        try {
-            const creator = await reaction.message.client.users.fetch(raidData.creatorId);
-            await creator.send(`Your raid "${raidData.template.name}" (ID: \`${raidData.raidId}\`) is now full!`);
-        } catch (error) {
-            console.error('Could not send DM to raid creator:', error);
+        if (filledSlots >= totalSlots) {
+            try {
+                const creator = await reaction.message.client.users.fetch(raidData.creatorId);
+                await creator.send(`Your raid "${raidData.template.name}" (ID: \`${raidData.raidId}\`) is now full!`);
+            } catch (error) {
+                console.error('Could not send DM to raid creator:', error);
+            }
         }
+    } finally {
+        release();
     }
 }
 
@@ -132,36 +156,44 @@ async function handleReactionRemove(reaction, user) {
     const raidData = activeRaids.get(reaction.message.id);
     if (!raidData || raidData.closed) return;
 
-    if (raidData.type === 'museum') {
-        await handleMuseumReactionRemove(reaction, user, raidData);
-        return;
-    }
+    // Acquire mutex lock for this specific raid
+    const lock = getLock(reaction.message.id);
+    const release = await lock.acquire();
 
-    if (raidData.type === 'key') {
-        await handleKeyReactionRemove(reaction, user, raidData);
-        return;
-    }
+    try {
+        if (raidData.type === 'museum') {
+            await handleMuseumReactionRemove(reaction, user, raidData);
+            return;
+        }
 
-    const roleIndex = raidData.signups.findIndex((r) => r.emoji === reaction.emoji.name);
-    if (roleIndex === -1) return;
+        if (raidData.type === 'key') {
+            await handleKeyReactionRemove(reaction, user, raidData);
+            return;
+        }
 
-    const role = raidData.signups[roleIndex];
-    role.waitlist = role.waitlist || [];
-    const userIndex = role.users.indexOf(user.id);
+        const roleIndex = raidData.signups.findIndex((r) => r.emoji === reaction.emoji.name);
+        if (roleIndex === -1) return;
 
-    if (userIndex > -1) {
-        role.users.splice(userIndex, 1);
-        await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
-        await updateRaidEmbed(reaction.message, raidData);
-        markActiveRaidUpdated(reaction.message.id);
-        return;
-    }
+        const role = raidData.signups[roleIndex];
+        role.waitlist = role.waitlist || [];
+        const userIndex = role.users.indexOf(user.id);
 
-    const waitlistIndex = role.waitlist.indexOf(user.id);
-    if (waitlistIndex > -1) {
-        role.waitlist.splice(waitlistIndex, 1);
-        await updateRaidEmbed(reaction.message, raidData);
-        markActiveRaidUpdated(reaction.message.id);
+        if (userIndex > -1) {
+            role.users.splice(userIndex, 1);
+            await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
+            await updateRaidEmbed(reaction.message, raidData);
+            markActiveRaidUpdated(reaction.message.id);
+            return;
+        }
+
+        const waitlistIndex = role.waitlist.indexOf(user.id);
+        if (waitlistIndex > -1) {
+            role.waitlist.splice(waitlistIndex, 1);
+            await updateRaidEmbed(reaction.message, raidData);
+            markActiveRaidUpdated(reaction.message.id);
+        }
+    } finally {
+        release();
     }
 }
 

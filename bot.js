@@ -247,33 +247,42 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
-    // Handle poll votes
-    if (!user.bot) {
-        const poll = getPollByMessage(reaction.message.id);
-        if (poll && !poll.closed) {
-            const optionIndex = getIndexFromEmoji(reaction.emoji.name);
-            if (optionIndex >= 0 && optionIndex < poll.options.length) {
-                recordVote(poll.id, user.id, optionIndex);
+    try {
+        // Handle poll votes
+        if (!user.bot) {
+            const poll = getPollByMessage(reaction.message.id);
+            if (poll && !poll.closed) {
+                const optionIndex = getIndexFromEmoji(reaction.emoji.name);
+                if (optionIndex >= 0 && optionIndex < poll.options.length) {
+                    recordVote(poll.id, user.id, optionIndex);
+                }
             }
         }
+        // Handle raid reactions - AWAIT this
+        await handleReactionAdd(reaction, user);
+    } catch (error) {
+        console.error('Reaction handler failed:', error);
+        // Optionally DM user about failure
     }
-    // Handle raid reactions
-    handleReactionAdd(reaction, user);
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
-    // Handle poll vote removal
-    if (!user.bot) {
-        const poll = getPollByMessage(reaction.message.id);
-        if (poll && !poll.closed) {
-            const optionIndex = getIndexFromEmoji(reaction.emoji.name);
-            if (optionIndex >= 0 && optionIndex < poll.options.length) {
-                removeVote(poll.id, user.id, optionIndex);
+    try {
+        // Handle poll vote removal
+        if (!user.bot) {
+            const poll = getPollByMessage(reaction.message.id);
+            if (poll && !poll.closed) {
+                const optionIndex = getIndexFromEmoji(reaction.emoji.name);
+                if (optionIndex >= 0 && optionIndex < poll.options.length) {
+                    removeVote(poll.id, user.id, optionIndex);
+                }
             }
         }
+        // Handle raid reaction removals - AWAIT this
+        await handleReactionRemove(reaction, user);
+    } catch (error) {
+        console.error('Reaction remove handler failed:', error);
     }
-    // Handle raid reaction removals
-    handleReactionRemove(reaction, user);
 });
 
 client.on('guildCreate', async (guild) => {

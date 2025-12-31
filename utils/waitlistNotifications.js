@@ -15,10 +15,14 @@ async function processWaitlistOpenings(client, raidData, messageId) {
 
         while (role.waitlist.length > 0 && role.users.length < role.slots) {
             const userId = role.waitlist.shift();
-            cleanupUserAssignments(raidData, userId, role);
-            if (!role.users.includes(userId)) {
-                role.users.push(userId);
+
+            // Idempotency check - skip if already promoted by concurrent call
+            if (role.users.includes(userId)) {
+                continue;
             }
+
+            cleanupUserAssignments(raidData, userId, role);
+            role.users.push(userId);
             await dmAutoAssignment(client, raidData, messageId, userId, role, index);
             promoted = true;
         }

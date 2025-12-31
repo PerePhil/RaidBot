@@ -63,6 +63,8 @@ function runMigrations() {
         { table: 'recurring_raids', column: 'spawn_time_of_day', sql: 'ALTER TABLE recurring_raids ADD COLUMN spawn_time_of_day TEXT' },
         // Key boss signups support (added Dec 2024)
         { table: 'guilds', column: 'key_channel_id', sql: 'ALTER TABLE guilds ADD COLUMN key_channel_id TEXT' },
+        // Optimistic locking support (added Dec 2024)
+        { table: 'raids', column: 'version', sql: 'ALTER TABLE raids ADD COLUMN version INTEGER DEFAULT 1' },
     ];
 
     for (const migration of migrations) {
@@ -72,6 +74,7 @@ function runMigrations() {
                 console.log(`Migration: Added ${migration.column} to ${migration.table}`);
             } catch (error) {
                 console.error(`Migration failed for ${migration.column}:`, error.message);
+                throw new Error(`Critical migration failed: ${migration.column}. Cannot start bot.`);
             }
         }
     }

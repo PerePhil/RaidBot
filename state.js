@@ -62,15 +62,16 @@ function getStatements() {
         insertRaid: prepare(`
             INSERT INTO raids (message_id, raid_id, guild_id, channel_id, type,
                 template_slug, template_data, datetime, timestamp, length, strategy,
-                creator_id, max_slots, recurring_id, thread_id, creator_reminder_sent, participant_reminder_sent)
+                creator_id, max_slots, recurring_id, thread_id, creator_reminder_sent, participant_reminder_sent, version)
             VALUES (@message_id, @raid_id, @guild_id, @channel_id, @type,
                 @template_slug, @template_data, @datetime, @timestamp, @length, @strategy,
-                @creator_id, @max_slots, @recurring_id, @thread_id, @creator_reminder_sent, @participant_reminder_sent)
+                @creator_id, @max_slots, @recurring_id, @thread_id, @creator_reminder_sent, @participant_reminder_sent, @version)
         `),
         updateRaid: prepare(`
             UPDATE raids SET
                 creator_reminder_sent = @creator_reminder_sent,
-                participant_reminder_sent = @participant_reminder_sent
+                participant_reminder_sent = @participant_reminder_sent,
+                version = @version
             WHERE message_id = @message_id
         `),
         deleteRaid: prepare('DELETE FROM raids WHERE message_id = ?'),
@@ -443,7 +444,8 @@ function reconstructRaidData(raid, signups) {
         recurringId: raid.recurring_id || null,
         threadId: raid.thread_id || null,
         creatorReminderSent: raid.creator_reminder_sent === 1,
-        participantReminderSent: raid.participant_reminder_sent === 1
+        participantReminderSent: raid.participant_reminder_sent === 1,
+        version: raid.version || 1  // Load version for optimistic locking
     };
 
     if (isMuseum || isKey) {
@@ -535,7 +537,8 @@ function setActiveRaid(messageId, raidData, options = {}) {
     const existing = stmts.getRaid.get(messageId);
 
     if (!existing) {
-        // Insert new raid
+        // Insert new raid with initial version
+        raidData.version = 1;
         stmts.insertRaid.run({
             message_id: messageId,
             raid_id: raidData.raidId,
@@ -553,8 +556,16 @@ function setActiveRaid(messageId, raidData, options = {}) {
             recurring_id: raidData.recurringId || null,
             thread_id: raidData.threadId || null,
             creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
-            participant_reminder_sent: raidData.participantReminderSent ? 1 : 0
+            participant_reminder_sent: raidData.participantReminderSent ? 1 : 0,
+            version: raidData.version
         });
+    } else {
+        // Optimistic locking: check version before update
+        if (existing.version && raidData.version && existing.version !== raidData.version) {
+            throw new Error('Concurrent modification detected - please retry');
+        }
+        // Increment version for update
+        raidData.version = (existing.version || 0) + 1;
     }
 
     // Sync signups to database
@@ -657,15 +668,27 @@ function markActiveRaidUpdated(messageId, options = {}) {
 
     const stmts = getStatements();
 
-    // Update reminder flags
-    stmts.updateRaid.run({
-        message_id: messageId,
-        creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
-        participant_reminder_sent: raidData.participantReminderSent ? 1 : 0
-    });
+    // Wrap both operations in a transaction for atomicity
+    transaction(() => {
+        try {
+            // Increment version for optimistic locking
+            raidData.version = (raidData.version || 0) + 1;
 
-    // Sync signups
-    syncSignupsToDb(messageId, raidData);
+            // Update reminder flags and version
+            stmts.updateRaid.run({
+                message_id: messageId,
+                creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
+                participant_reminder_sent: raidData.participantReminderSent ? 1 : 0,
+                version: raidData.version
+            });
+
+            // Sync signups
+            syncSignupsToDb(messageId, raidData);
+        } catch (error) {
+            console.error('Transaction failed in markActiveRaidUpdated:', error);
+            throw error; // Triggers rollback
+        }
+    })();
 }
 
 // ===== RAID STATS =====

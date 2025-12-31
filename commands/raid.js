@@ -60,30 +60,36 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
     });
 
     collector.on('collect', async (i) => {
-        const parts = i.customId.split(':');
-        if (parts[0] !== 'raid' || parts.length < 3) {
-            return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
-        }
-        const action = parts[1];
-        const msgId = parts[2];
-        const raidEntry = activeRaids.get(msgId);
-        if (!raidEntry) {
-            return i.reply({ content: 'Raid data not found (maybe deleted).', flags: MessageFlags.Ephemeral });
-        }
+        try {
+            const parts = i.customId.split(':');
+            if (parts[0] !== 'raid' || parts.length < 3) {
+                return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
+            }
+            const action = parts[1];
+            const msgId = parts[2];
+            const raidEntry = activeRaids.get(msgId);
+            if (!raidEntry) {
+                return i.reply({ content: 'Raid data not found (maybe deleted).', flags: MessageFlags.Ephemeral });
+            }
 
-        if (action === 'close') {
-            return closeRaid(i, { raidId: raidEntry.raidId, messageId: msgId, raidData: raidEntry, updatePanel: true });
+            if (action === 'close') {
+                return closeRaid(i, { raidId: raidEntry.raidId, messageId: msgId, raidData: raidEntry, updatePanel: true });
+            }
+            if (action === 'reopen') {
+                return reopenRaid(i, { raidId: raidEntry.raidId, messageId: msgId, raidData: raidEntry, updatePanel: true });
+            }
+            if (action === 'delete') {
+                return deleteRaid(i, { raidId: raidEntry.raidId, messageId: msgId, raidData: raidEntry, updatePanel: true });
+            }
+            if (action === 'time') {
+                return showTimeModal(i, raidEntry, msgId);
+            }
+            return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
+        } catch (error) {
+            console.error('Collector handler error:', error);
+            collector.stop('error');
+            throw error;
         }
-        if (action === 'reopen') {
-            return reopenRaid(i, { raidId: raidEntry.raidId, messageId: msgId, raidData: raidEntry, updatePanel: true });
-        }
-        if (action === 'delete') {
-            return deleteRaid(i, { raidId: raidEntry.raidId, messageId: msgId, raidData: raidEntry, updatePanel: true });
-        }
-        if (action === 'time') {
-            return showTimeModal(i, raidEntry, msgId);
-        }
-        return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
     });
 
     collector.on('end', async () => {

@@ -150,7 +150,9 @@ async function startCreateFlow(interaction) {
             await handleCreateStep(i, state, collector);
         } catch (error) {
             console.error('Error in recurring create flow:', error);
+            collector.stop('error');
             await i.reply({ content: 'An error occurred. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => { });
+            throw error;
         }
     });
 
@@ -717,7 +719,9 @@ async function startEditFlow(interaction, id) {
             await handleEditStep(i, editState, collector);
         } catch (error) {
             console.error('Error in recurring edit flow:', error);
+            collector.stop('error');
             await i.reply({ content: 'An error occurred. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => {});
+            throw error;
         }
     });
 

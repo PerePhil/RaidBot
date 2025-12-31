@@ -7,10 +7,12 @@ class RateLimiter {
      * @param {Object} options
      * @param {number} options.maxRequests - Maximum requests allowed in the window
      * @param {number} options.windowMs - Time window in milliseconds
+     * @param {number} options.maxEntries - Maximum number of unique keys to track (prevents memory leak)
      */
-    constructor({ maxRequests = 10, windowMs = 60000 } = {}) {
+    constructor({ maxRequests = 10, windowMs = 60000, maxEntries = 10000 } = {}) {
         this.maxRequests = maxRequests;
         this.windowMs = windowMs;
+        this.maxEntries = maxEntries;
         this.requests = new Map(); // key -> [timestamps]
     }
 
@@ -29,6 +31,12 @@ class RateLimiter {
         if (validTimestamps.length >= this.maxRequests) {
             this.requests.set(key, validTimestamps);
             return false;
+        }
+
+        // Evict oldest entries if at capacity (LRU eviction)
+        if (!this.requests.has(key) && this.requests.size >= this.maxEntries) {
+            const oldestKey = this.requests.keys().next().value;
+            this.requests.delete(oldestKey);
         }
 
         validTimestamps.push(now);
@@ -98,14 +106,14 @@ class RateLimiter {
 const reactionLimiter = new RateLimiter({ maxRequests: 5, windowMs: 10000 }); // 5 reactions per 10s per user
 const commandCooldowns = new RateLimiter({ maxRequests: 3, windowMs: 30000 }); // 3 commands per 30s per user
 
-// Cleanup old entries every 5 minutes (skip in test mode)
+// Cleanup old entries every 1 minute (more frequent to prevent memory buildup)
 const isTestMode = process.env.NODE_ENV === 'test' ||
     process.argv.some(arg => arg.includes('node:test') || arg.includes('--test'));
 if (!isTestMode) {
     setInterval(() => {
         reactionLimiter.cleanup();
         commandCooldowns.cleanup();
-    }, 5 * 60 * 1000);
+    }, 60 * 1000); // 1 minute
 }
 
 module.exports = {

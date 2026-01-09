@@ -7,6 +7,7 @@ const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
+    StringSelectMenuBuilder,
     MessageFlags
 } = require('discord.js');
 const {
@@ -84,6 +85,9 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
             if (action === 'time') {
                 return showTimeModal(i, raidEntry, msgId);
             }
+            if (action === 'length') {
+                return showLengthSelect(i, raidEntry, msgId);
+            }
             return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
         } catch (error) {
             console.error('Collector handler error:', error);
@@ -94,10 +98,7 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
 
     collector.on('end', async () => {
         const disabledRow = new ActionRowBuilder().addComponents(
-            ButtonBuilder.from(buttons.components[0].data).setDisabled(true),
-            ButtonBuilder.from(buttons.components[1].data).setDisabled(true),
-            ButtonBuilder.from(buttons.components[2].data).setDisabled(true),
-            ButtonBuilder.from(buttons.components[3].data).setDisabled(true)
+            ...buttons.components.map((btn) => ButtonBuilder.from(btn.data).setDisabled(true))
         );
         await replyMessage.edit({ components: [disabledRow] }).catch(() => {});
     });
@@ -367,6 +368,92 @@ async function showTimeModal(interaction, raidData, messageId) {
         });
     }
 }
+
+async function showLengthSelect(interaction, raidData, messageId) {
+    const currentLength = raidData.length || '1.5';
+
+    const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId(`raid:lengthSelect:${messageId}`)
+            .setPlaceholder('Select new length')
+            .addOptions(
+                { label: '1.5 hours', value: '1.5', default: currentLength === '1.5' },
+                { label: '3 hours', value: '3', default: currentLength === '3' }
+            )
+    );
+
+    await interaction.reply({
+        content: `Current length: **${currentLength} hours**\nSelect new length:`,
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
+
+    const selectInteraction = await interaction.channel.awaitMessageComponent({
+        filter: (i) => i.customId === `raid:lengthSelect:${messageId}` && i.user.id === interaction.user.id,
+        time: 30000
+    }).catch(() => null);
+
+    if (!selectInteraction) {
+        return interaction.editReply({ content: 'Selection timed out.', components: [] });
+    }
+
+    const newLength = selectInteraction.values[0];
+
+    if (newLength === currentLength) {
+        return selectInteraction.update({ content: 'Length unchanged.', components: [] });
+    }
+
+    const message = await fetchRaidMessage(selectInteraction.guild, raidData, messageId);
+    if (!message) {
+        return selectInteraction.update({ content: 'Could not find the signup message.', components: [] });
+    }
+
+    try {
+        const embed = EmbedBuilder.from(message.embeds[0]);
+        const existingFields = embed.data.fields || [];
+        const timestampStr = raidData.timestamp ? `<t:${raidData.timestamp}:F>` : (raidData.datetime || 'Not specified');
+        const dateFieldValue = `${timestampStr} || \`${newLength} HOUR KEY\``;
+
+        const filtered = existingFields.filter((field) =>
+            !(typeof field.name === 'string' && field.name.includes('Date + Time'))
+        );
+        embed.setFields([
+            { name: '\n**Date + Time:**', value: dateFieldValue, inline: false },
+            ...filtered
+        ]);
+
+        await message.edit({ embeds: [embed] });
+
+        raidData.length = newLength;
+        markActiveRaidUpdated(messageId);
+
+        await selectInteraction.update({
+            content: `Length updated to **${newLength} hours**!`,
+            components: []
+        });
+
+        const panelLink = buildMessageLink(raidData, messageId);
+        await sendAuditLog(selectInteraction.guild, `Raid ${raidData.raidId} length changed`, {
+            title: 'Raid Length Updated',
+            color: 0x5865F2,
+            fields: [
+                { name: 'By', value: `<@${selectInteraction.user.id}>`, inline: true },
+                { name: 'Raid ID', value: raidData.raidId || 'Unknown', inline: true },
+                { name: 'New length', value: `${newLength} hours`, inline: true },
+                panelLink ? { name: 'View signup', value: panelLink, inline: false } : null
+            ].filter(Boolean)
+        });
+
+        await refreshPanel(selectInteraction, raidData, messageId);
+    } catch (error) {
+        console.error('Error updating raid length:', error);
+        return selectInteraction.update({
+            content: 'Failed to update raid length.',
+            components: []
+        });
+    }
+}
+
 function buildPanelEmbed(raidId, raidData, messageId) {
     const status = raidData.closed ? 'Closed' : 'Open';
     const link = buildMessageLink(raidData, messageId);
@@ -382,6 +469,7 @@ function buildPanelEmbed(raidId, raidData, messageId) {
 }
 
 function buildPanelComponents(messageId, raidData) {
+    const isMuseumOrKey = raidData?.type === 'museum' || raidData?.type === 'key';
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`raid:close:${messageId}`)
@@ -400,7 +488,12 @@ function buildPanelComponents(messageId, raidData) {
         new ButtonBuilder()
             .setCustomId(`raid:time:${messageId}`)
             .setLabel('Change Time')
-            .setStyle(ButtonStyle.Primary)
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId(`raid:length:${messageId}`)
+            .setLabel('Change Length')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(isMuseumOrKey)
     );
 }
 
@@ -425,7 +518,8 @@ async function disablePanel(interaction) {
                 new ButtonBuilder().setCustomId('raid:close:disabled').setLabel('Close').setStyle(ButtonStyle.Danger).setDisabled(true),
                 new ButtonBuilder().setCustomId('raid:reopen:disabled').setLabel('Reopen').setStyle(ButtonStyle.Success).setDisabled(true),
                 new ButtonBuilder().setCustomId('raid:delete:disabled').setLabel('Delete').setStyle(ButtonStyle.Secondary).setDisabled(true),
-                new ButtonBuilder().setCustomId('raid:time:disabled').setLabel('Change Time').setStyle(ButtonStyle.Primary).setDisabled(true)
+                new ButtonBuilder().setCustomId('raid:time:disabled').setLabel('Change Time').setStyle(ButtonStyle.Primary).setDisabled(true),
+                new ButtonBuilder().setCustomId('raid:length:disabled').setLabel('Change Length').setStyle(ButtonStyle.Secondary).setDisabled(true)
             );
             await interaction.message.edit({ components: [row] }).catch(() => {});
         } else {

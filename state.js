@@ -69,6 +69,7 @@ function getStatements() {
         `),
         updateRaid: prepare(`
             UPDATE raids SET
+                length = @length,
                 creator_reminder_sent = @creator_reminder_sent,
                 participant_reminder_sent = @participant_reminder_sent,
                 version = @version
@@ -674,9 +675,10 @@ function markActiveRaidUpdated(messageId, options = {}) {
             // Increment version for optimistic locking
             raidData.version = (raidData.version || 0) + 1;
 
-            // Update reminder flags and version
+            // Update raid metadata (length, reminder flags, version)
             stmts.updateRaid.run({
                 message_id: messageId,
+                length: raidData.length || null,
                 creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
                 participant_reminder_sent: raidData.participantReminderSent ? 1 : 0,
                 version: raidData.version

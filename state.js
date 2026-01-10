@@ -80,11 +80,11 @@ function getStatements() {
             INSERT INTO raids (message_id, raid_id, guild_id, channel_id, type,
                 template_slug, template_data, datetime, timestamp, length, strategy,
                 creator_id, max_slots, recurring_id, thread_id, creator_reminder_sent, participant_reminder_sent,
-                closed_at, closed_by, closed_reason, auto_close_executed, version)
+                closed_at, closed_by, closed_reason, auto_close_executed, stats_recorded, version)
             VALUES (@message_id, @raid_id, @guild_id, @channel_id, @type,
                 @template_slug, @template_data, @datetime, @timestamp, @length, @strategy,
                 @creator_id, @max_slots, @recurring_id, @thread_id, @creator_reminder_sent, @participant_reminder_sent,
-                @closed_at, @closed_by, @closed_reason, @auto_close_executed, @version)
+                @closed_at, @closed_by, @closed_reason, @auto_close_executed, @stats_recorded, @version)
         `),
         updateRaid: prepare(`
             UPDATE raids SET
@@ -95,6 +95,7 @@ function getStatements() {
                 closed_by = @closed_by,
                 closed_reason = @closed_reason,
                 auto_close_executed = @auto_close_executed,
+                stats_recorded = @stats_recorded,
                 version = @version
             WHERE message_id = @message_id
         `),
@@ -474,6 +475,8 @@ function reconstructRaidData(raid, signups) {
         closedBy: raid.closed_by || null,
         closedReason: raid.closed_reason || null,
         autoCloseExecuted: raid.auto_close_executed === 1,
+        // If stats_recorded is in DB, use it; otherwise assume closed raids already had stats recorded
+        statsRecorded: raid.stats_recorded === 1 || (raid.closed_at ? true : false),
         version: raid.version || 1  // Load version for optimistic locking
     };
 
@@ -590,6 +593,7 @@ function setActiveRaid(messageId, raidData, options = {}) {
             closed_by: raidData.closedBy || null,
             closed_reason: raidData.closedReason || null,
             auto_close_executed: raidData.autoCloseExecuted ? 1 : 0,
+            stats_recorded: raidData.statsRecorded ? 1 : 0,
             version: raidData.version
         });
     } else {
@@ -722,6 +726,7 @@ function markActiveRaidUpdated(messageId, options = {}) {
                 closed_at: raidData.closedAt || null,
                 closed_by: raidData.closedBy || null,
                 closed_reason: raidData.closedReason || null,
+                stats_recorded: raidData.statsRecorded ? 1 : 0,
                 auto_close_executed: raidData.autoCloseExecuted ? 1 : 0,
                 version: raidData.version
             });

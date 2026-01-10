@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS raids (
   closed_by TEXT,              -- User ID who closed the raid
   closed_reason TEXT,          -- 'manual', 'auto', 'museum_start', 'key_start'
   auto_close_executed INTEGER DEFAULT 0,  -- Flag to prevent re-closing on restart
+  stats_recorded INTEGER DEFAULT 0,  -- Flag to prevent double-counting stats on restart
   version INTEGER DEFAULT 1    -- Optimistic locking version
 );
 

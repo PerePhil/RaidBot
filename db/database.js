@@ -71,6 +71,8 @@ function runMigrations() {
         { table: 'raids', column: 'closed_by', sql: 'ALTER TABLE raids ADD COLUMN closed_by TEXT' },
         { table: 'raids', column: 'closed_reason', sql: 'ALTER TABLE raids ADD COLUMN closed_reason TEXT' },
         { table: 'raids', column: 'auto_close_executed', sql: 'ALTER TABLE raids ADD COLUMN auto_close_executed INTEGER DEFAULT 0' },
+        // Stats tracking persistence (added Jan 2025)
+        { table: 'raids', column: 'stats_recorded', sql: 'ALTER TABLE raids ADD COLUMN stats_recorded INTEGER DEFAULT 0' },
     ];
 
     for (const migration of migrations) {

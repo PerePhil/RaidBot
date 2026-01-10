@@ -66,6 +66,11 @@ async function runReminderCheck() {
         let updated = false;
 
         if (settings.creatorRemindersEnabled && !raidData.creatorReminderSent && secondsUntil <= settings.creatorReminderSeconds) {
+            logger.info('Creator reminder triggered', {
+                raidId: raidData.raidId,
+                secondsUntil,
+                threshold: settings.creatorReminderSeconds
+            });
             await sendCreatorReminder(client, raidData, messageId);
             raidData.creatorReminderSent = true;
             updated = true;
@@ -99,19 +104,37 @@ async function sendCreatorReminder(client, raidData, messageId) {
             () => client.users.fetch(raidData.creatorId),
             null
         );
-        if (!creator) return;
+        if (!creator) {
+            logger.warn('Could not fetch creator for reminder', {
+                raidId: raidData.raidId,
+                creatorId: raidData.creatorId
+            });
+            return;
+        }
 
         const link = buildMessageLink(raidData, messageId);
         const when = formatTimeLabel(raidData);
         const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : 'Raid');
 
-        await sendDMWithBreaker(creator, [
+        const sent = await sendDMWithBreaker(creator, [
             `Reminder: your ${type} (ID: \`${raidData.raidId}\`) starts soon.`,
             `Scheduled time: ${when}`,
             link ? `Signup link: ${link}` : null
         ].filter(Boolean).join('\n'));
+
+        if (sent) {
+            logger.info('Creator reminder sent successfully', {
+                raidId: raidData.raidId,
+                creatorId: raidData.creatorId
+            });
+        } else {
+            logger.warn('Creator reminder DM failed to send', {
+                raidId: raidData.raidId,
+                creatorId: raidData.creatorId
+            });
+        }
     } catch (error) {
-        logger.warn('Failed to send creator reminder', { error });
+        logger.warn('Failed to send creator reminder', { error, raidId: raidData.raidId });
     }
 }
 

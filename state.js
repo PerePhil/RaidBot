@@ -491,6 +491,10 @@ function reconstructRaidData(raid, signups) {
         raidData.template = safeJsonParse(raid.template_data, null);
         raidData.length = raid.length;
         raidData.strategy = raid.strategy;
+        // Debug: log if length was loaded
+        if (raid.length) {
+            logger.debug(`Loaded raid ${raid.raid_id} with length: ${raid.length}`);
+        }
 
         // First, build ALL roles from the template (to preserve empty roles)
         const allRoles = [];
@@ -730,6 +734,7 @@ function markActiveRaidUpdated(messageId, options = {}) {
                 auto_close_executed: raidData.autoCloseExecuted ? 1 : 0,
                 version: raidData.version
             });
+            logger.debug(`Persisted raid ${raidData.raidId} update (length: ${raidData.length || 'null'})`);
 
             // Sync signups
             syncSignupsToDb(messageId, raidData);

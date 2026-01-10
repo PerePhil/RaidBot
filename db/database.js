@@ -67,6 +67,10 @@ function runMigrations() {
         { table: 'raids', column: 'version', sql: 'ALTER TABLE raids ADD COLUMN version INTEGER DEFAULT 1' },
         // Recurring raid role mentions (added Dec 2024)
         { table: 'recurring_raids', column: 'mention_role_id', sql: 'ALTER TABLE recurring_raids ADD COLUMN mention_role_id TEXT' },
+        // Closure metadata persistence (added Jan 2025)
+        { table: 'raids', column: 'closed_by', sql: 'ALTER TABLE raids ADD COLUMN closed_by TEXT' },
+        { table: 'raids', column: 'closed_reason', sql: 'ALTER TABLE raids ADD COLUMN closed_reason TEXT' },
+        { table: 'raids', column: 'auto_close_executed', sql: 'ALTER TABLE raids ADD COLUMN auto_close_executed INTEGER DEFAULT 0' },
     ];
 
     for (const migration of migrations) {

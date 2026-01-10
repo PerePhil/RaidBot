@@ -62,16 +62,22 @@ function getStatements() {
         insertRaid: prepare(`
             INSERT INTO raids (message_id, raid_id, guild_id, channel_id, type,
                 template_slug, template_data, datetime, timestamp, length, strategy,
-                creator_id, max_slots, recurring_id, thread_id, creator_reminder_sent, participant_reminder_sent, version)
+                creator_id, max_slots, recurring_id, thread_id, creator_reminder_sent, participant_reminder_sent,
+                closed_at, closed_by, closed_reason, auto_close_executed, version)
             VALUES (@message_id, @raid_id, @guild_id, @channel_id, @type,
                 @template_slug, @template_data, @datetime, @timestamp, @length, @strategy,
-                @creator_id, @max_slots, @recurring_id, @thread_id, @creator_reminder_sent, @participant_reminder_sent, @version)
+                @creator_id, @max_slots, @recurring_id, @thread_id, @creator_reminder_sent, @participant_reminder_sent,
+                @closed_at, @closed_by, @closed_reason, @auto_close_executed, @version)
         `),
         updateRaid: prepare(`
             UPDATE raids SET
                 length = @length,
                 creator_reminder_sent = @creator_reminder_sent,
                 participant_reminder_sent = @participant_reminder_sent,
+                closed_at = @closed_at,
+                closed_by = @closed_by,
+                closed_reason = @closed_reason,
+                auto_close_executed = @auto_close_executed,
                 version = @version
             WHERE message_id = @message_id
         `),
@@ -446,6 +452,11 @@ function reconstructRaidData(raid, signups) {
         threadId: raid.thread_id || null,
         creatorReminderSent: raid.creator_reminder_sent === 1,
         participantReminderSent: raid.participant_reminder_sent === 1,
+        closed: raid.closed_at ? true : false,
+        closedAt: raid.closed_at || null,
+        closedBy: raid.closed_by || null,
+        closedReason: raid.closed_reason || null,
+        autoCloseExecuted: raid.auto_close_executed === 1,
         version: raid.version || 1  // Load version for optimistic locking
     };
 
@@ -558,6 +569,10 @@ function setActiveRaid(messageId, raidData, options = {}) {
             thread_id: raidData.threadId || null,
             creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
             participant_reminder_sent: raidData.participantReminderSent ? 1 : 0,
+            closed_at: raidData.closedAt || null,
+            closed_by: raidData.closedBy || null,
+            closed_reason: raidData.closedReason || null,
+            auto_close_executed: raidData.autoCloseExecuted ? 1 : 0,
             version: raidData.version
         });
     } else {
@@ -675,12 +690,16 @@ function markActiveRaidUpdated(messageId, options = {}) {
             // Increment version for optimistic locking
             raidData.version = (raidData.version || 0) + 1;
 
-            // Update raid metadata (length, reminder flags, version)
+            // Update raid metadata (length, reminder flags, closure data, version)
             stmts.updateRaid.run({
                 message_id: messageId,
                 length: raidData.length || null,
                 creator_reminder_sent: raidData.creatorReminderSent ? 1 : 0,
                 participant_reminder_sent: raidData.participantReminderSent ? 1 : 0,
+                closed_at: raidData.closedAt || null,
+                closed_by: raidData.closedBy || null,
+                closed_reason: raidData.closedReason || null,
+                auto_close_executed: raidData.autoCloseExecuted ? 1 : 0,
                 version: raidData.version
             });
 

@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS raids (
   creator_reminder_sent INTEGER DEFAULT 0,
   participant_reminder_sent INTEGER DEFAULT 0,
   created_at INTEGER DEFAULT (unixepoch()),
-  closed_at INTEGER
+  closed_at INTEGER,
+  closed_by TEXT,              -- User ID who closed the raid
+  closed_reason TEXT,          -- 'manual', 'auto', 'museum_start', 'key_start'
+  auto_close_executed INTEGER DEFAULT 0,  -- Flag to prevent re-closing on restart
+  version INTEGER DEFAULT 1    -- Optimistic locking version
 );
 
 -- Raid signups (normalized from nested arrays)

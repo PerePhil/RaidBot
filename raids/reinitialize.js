@@ -1,5 +1,5 @@
 const templates = require('../templates');
-const { logger } = require('./utils/logger');
+const { logger } = require('../utils/logger');
 const {
     activeRaids,
     loadActiveRaidState,

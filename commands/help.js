@@ -17,7 +17,8 @@ const CATEGORIES = {
             { name: '/raidinfo action:detail <raid_id>', desc: 'View full signup details for a specific raid.' },
             { name: '/raidinfo action:export', desc: 'Download an .ics calendar file of upcoming raids.' },
             { name: '/changelog', desc: 'View recent bot updates and new features.' },
-            { name: '/stats user', desc: 'View your own participation stats, favorite roles, and attendance rate.' }
+            { name: '/stats user', desc: 'View your own participation stats, favorite roles, and attendance rate.' },
+            { name: '/ping', desc: 'Check bot health, latency, uptime, and active raid count.' }
         ]
     },
     availability: {
@@ -108,6 +109,20 @@ const CATEGORIES = {
             { name: '/poll create', desc: 'Create a reaction-based poll with multiple time options.' },
             { name: '/poll results <poll_id>', desc: 'View current voting breakdown with progress bars.' },
             { name: '/poll close <poll_id>', desc: 'Finalize poll and highlight the winning options.' }
+        ]
+    },
+    monitoring: {
+        title: 'Monitoring (Admin)',
+        description: 'Commands for bot health monitoring and performance alerts.',
+        color: 0x00cec9,
+        adminOnly: true,
+        commands: [
+            { name: '/testalert', desc: 'Send a test alert to the bot owner to verify the DM-based alert system is working.' }
+        ],
+        examples: [
+            '**Alert system:** Set BOT_OWNER_ID in config to receive performance alerts via DM',
+            '**Alerts include:** High latency, DM failures, memory issues, circuit breaker states',
+            '**Daily report:** Automatic health summary sent at 9 AM'
         ]
     }
 };

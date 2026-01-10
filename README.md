@@ -16,6 +16,7 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 - **Time Slot Polling** — Reaction-based polls to find optimal raid times with live vote tracking
 - **Customizable Templates** — Enable/disable or rename raid templates per guild
 - **Rate Limiting** — Prevents spam with configurable cooldowns on reactions and commands
+- **Performance Monitoring** — Discord DM alerts for high latency, DM failures, memory issues, and circuit breaker states
 - **Graceful Shutdown** — Safe shutdown with state preservation
 
 ## Commands
@@ -37,6 +38,7 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 | `/changelog` | View current release notes |
 | `/help` | Command documentation |
 | `/ping` | Bot health check and status |
+| `/testalert` | Send test alert to bot owner (admin only) |
 
 ## Setup
 
@@ -50,16 +52,19 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
    {
      "clientId": "YOUR_CLIENT_ID",
      "token": "YOUR_BOT_TOKEN",
-     "allowedGuildIds": ["GUILD_ID_1", "GUILD_ID_2"]
+     "allowedGuildIds": ["GUILD_ID_1", "GUILD_ID_2"],
+     "ownerId": "YOUR_USER_ID"
    }
    ```
    - `allowedGuildIds` is optional; leave empty to allow all guilds
+   - `ownerId` is optional; enables DM-based performance alerts
 
    **Or use environment variables:**
    ```bash
    export DISCORD_CLIENT_ID="YOUR_CLIENT_ID"
    export DISCORD_TOKEN="YOUR_BOT_TOKEN"
    export DISCORD_ALLOWED_GUILDS="GUILD_ID_1,GUILD_ID_2"
+   export BOT_OWNER_ID="YOUR_USER_ID"
    ```
 
 4. Run the bot:
@@ -74,6 +79,7 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 | `DISCORD_CLIENT_ID` | Bot client ID | — |
 | `DISCORD_TOKEN` | Bot token | — |
 | `DISCORD_ALLOWED_GUILDS` | Comma-separated guild IDs | All guilds |
+| `BOT_OWNER_ID` | User ID for DM-based performance alerts | None |
 | `LOG_LEVEL` | Logging verbosity: DEBUG, INFO, WARN, ERROR | INFO |
 | `LOG_TO_FILE` | Enable file logging | false |
 
@@ -88,6 +94,9 @@ A Discord bot for managing raid signups in Wizard101. Supports multiple raid typ
 │   ├── logger.js          # Structured logging
 │   ├── validators.js      # Input validation
 │   ├── rateLimiter.js     # Rate limiting
+│   ├── metrics.js         # Prometheus metrics collection
+│   ├── circuitBreaker.js  # Circuit breaker pattern for API resilience
+│   ├── alerts.js          # Discord DM-based performance alerts
 │   ├── errorMessages.js   # User-friendly errors
 │   ├── dmRetry.js         # DM retry logic
 │   └── ...

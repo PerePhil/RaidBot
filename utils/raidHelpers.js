@@ -4,6 +4,8 @@ const { activeRaids, raidChannels, museumChannels, keyChannels, recordRaidStats,
 const { recordRaidAnalytics, decrementRaidAnalytics } = require('./analytics');
 const { sendAuditLog } = require('../auditLog');
 const { buildLabelsForRaid } = require('./userLabels');
+const { logger } = require('./logger');
+const { incrementCounter } = require('./metrics');
 
 // Channel configuration for different signup types
 const CHANNEL_CONFIG = {
@@ -132,7 +134,7 @@ function parseDateTimeToTimestamp(datetimeStr, referenceDate = new Date()) {
 
         return null;
     } catch (error) {
-        console.error('Error parsing datetime:', error);
+        logger.error('Error parsing datetime:', { error: error });
         return null;
     }
 }
@@ -382,20 +384,23 @@ async function closeRaidSignup(message, raidData, options = {}) {
     try {
         await message.edit({ embeds: [embed], allowedMentions: { parse: [] } });
     } catch (error) {
-        console.error('Failed to edit raid embed while closing:', error);
+        logger.error('Failed to edit raid embed while closing:', { error: error });
         return false;
     }
 
     try {
         await message.reactions.removeAll();
     } catch (error) {
-        console.error('Failed to remove reactions when closing raid:', error);
+        logger.error('Failed to remove reactions when closing raid:', { error: error });
     }
 
     raidData.closed = true;
     raidData.closedBy = closedByUserId;
     raidData.closedAt = now;
     raidData.closedReason = reason;
+
+    // Track metrics
+    incrementCounter('raids_closed_total');
 
     // Smart delta tracking for stats
     if (!raidData.statsRecorded) {
@@ -460,9 +465,13 @@ async function closeRaidSignup(message, raidData, options = {}) {
             }
         } catch (error) {
             // Thread may already be archived or deleted
-            console.error('Failed to archive raid thread:', error.message);
+            logger.error('Failed to archive raid thread:', { error: error.message });
         }
     }
+
+    // Clean up mutex lock to prevent memory leak
+    const { cleanupRaidLock } = require('../raids/reactionHandlers');
+    cleanupRaidLock(message.id);
 
     return true;
 }
@@ -504,7 +513,7 @@ async function reopenRaidSignup(message, raidData, options = {}) {
     try {
         await message.edit({ embeds: [embed], allowedMentions: { parse: [] } });
     } catch (error) {
-        console.error('Failed to edit raid embed while reopening:', error);
+        logger.error('Failed to edit raid embed while reopening:', { error: error });
         return false;
     }
 
@@ -540,7 +549,7 @@ async function restoreSignupReactions(message, raidData) {
             }
             await message.react(emoji);
         } catch (error) {
-            console.error('Failed to add signup reaction when reopening raid:', error);
+            logger.error('Failed to add signup reaction when reopening raid:', { error: error });
         }
     }
 }

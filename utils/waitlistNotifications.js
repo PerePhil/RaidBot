@@ -1,6 +1,18 @@
 const { formatRaidType, formatTimeLabel, buildMessageLink } = require('./raidFormatters');
 const { markActiveRaidUpdated } = require('../state');
+const { logger } = require('./logger');
+const { incrementCounter } = require('./metrics');
+const { sendDMWithBreaker } = require('./circuitBreaker');
 
+/**
+ * Process waitlist promotions when slots open up
+ *
+ * Race Condition Protection:
+ * 1. Per-raid mutex lock (in reactionHandlers.js) prevents concurrent execution
+ * 2. Database transaction in markActiveRaidUpdated() ensures atomic writes
+ * 3. Optimistic locking (version field) detects concurrent modifications
+ * 4. Idempotency check (line 21) handles duplicate promotions gracefully
+ */
 async function processWaitlistOpenings(client, raidData, messageId) {
     if (raidData.closed) return false;
 
@@ -24,6 +36,7 @@ async function processWaitlistOpenings(client, raidData, messageId) {
             cleanupUserAssignments(raidData, userId, role);
             role.users.push(userId);
             await dmAutoAssignment(client, raidData, messageId, userId, role, index);
+            incrementCounter('waitlist_promotions_total');
             promoted = true;
         }
     }
@@ -72,6 +85,7 @@ async function promoteMuseumWaitlist(client, raidData, messageId) {
         if (!raidData.signups.includes(userId)) {
             raidData.signups.push(userId);
             await dmMuseumAssignment(client, raidData, messageId, userId);
+            incrementCounter('waitlist_promotions_total');
             promoted = true;
         }
     }
@@ -99,10 +113,12 @@ async function notifyUser(client, raidData, messageId, userId, lines) {
     const payload = lines.join('\n');
     try {
         const user = await client.users.fetch(userId);
-        await user.send(payload);
-        return;
+        const sent = await sendDMWithBreaker(user, payload);
+        if (sent) return;
+        // If DM failed through circuit breaker, try fallback
     } catch (error) {
-        console.error('Could not DM user about waitlist promotion:', error);
+        logger.error('Could not DM user about waitlist promotion:', { error: error });
+        incrementCounter('dm_failures_total');
     }
 
     // Fallback: post in the signup channel so they still see the notice.
@@ -117,7 +133,7 @@ async function notifyUser(client, raidData, messageId, userId, lines) {
                 return;
             }
         } catch (error) {
-            console.error('Failed to send fallback waitlist notice in channel:', error);
+            logger.error('Failed to send fallback waitlist notice in channel:', { error: error });
         }
     }
 
@@ -129,7 +145,7 @@ async function notifyUser(client, raidData, messageId, userId, lines) {
             await member?.send(payload);
         }
     } catch (error) {
-        console.error('Could not deliver waitlist promotion by any path:', error);
+        logger.error('Could not deliver waitlist promotion by any path:', { error: error });
     }
 }
 

@@ -228,3 +228,11 @@ CREATE INDEX IF NOT EXISTS idx_custom_templates_guild ON custom_templates(guild_
 CREATE INDEX IF NOT EXISTS idx_recurring_guild ON recurring_raids(guild_id);
 CREATE INDEX IF NOT EXISTS idx_recurring_next ON recurring_raids(next_scheduled_at);
 
+-- Performance optimization indexes (added 2026-01-10)
+CREATE INDEX IF NOT EXISTS idx_raids_guild_closed ON raids(guild_id, closed_at);
+CREATE INDEX IF NOT EXISTS idx_raids_closed ON raids(closed_at);
+CREATE INDEX IF NOT EXISTS idx_raids_creator ON raids(creator_id);
+CREATE INDEX IF NOT EXISTS idx_signups_message_user ON signups(message_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_enabled_next ON recurring_raids(enabled, next_scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_raids_recurring ON raids(recurring_id);
+

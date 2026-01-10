@@ -27,6 +27,8 @@ const { loadAnalytics } = require('./utils/analytics');
 const { logger } = require('./utils/logger');
 const { close: closeDatabase } = require('./db/database');
 const { loadRecurringRaids } = require('./recurringManager');
+const { startMetricsLogging, setGauge, incrementCounter, recordHistogram } = require('./utils/metrics');
+const { initializeAlerts } = require('./utils/alerts');
 
 const CLIENT_ID = config.clientId;
 const TOKEN = config.token;
@@ -70,8 +72,10 @@ client.once('clientReady', async () => {
         await reinitializeRaids(client);
         await updateBotPresence();
         startReminderScheduler();
+        startMetricsLogging(); // Log metrics every 5 minutes
+        initializeAlerts(client, config.ownerId); // Initialize DM-based alerting system
     } catch (error) {
-        console.error('Failed to initialize commands or raids:', error);
+        logger.error('Failed to initialize commands or raids', { error });
     }
 });
 
@@ -124,7 +128,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.showModal(modal);
         } catch (error) {
-            console.error('Error showing availability modal:', error);
+            logger.error('Error showing availability modal', { error, userId: interaction.user.id });
         }
         return;
     }
@@ -201,7 +205,7 @@ client.on('interactionCreate', async (interaction) => {
 
             return interaction.reply({ content: response, flags: MessageFlags.Ephemeral });
         } catch (error) {
-            console.error('Error handling availability modal submit:', error);
+            logger.error('Error handling availability modal submit', { error, userId: interaction.user.id });
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({
                     content: 'An error occurred while saving your availability.',
@@ -252,10 +256,21 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
+    const startTime = Date.now();
     try {
         await command.execute(interaction);
+        const duration = (Date.now() - startTime) / 1000;
+        incrementCounter('commands_total', { command: interaction.commandName });
+        recordHistogram('command_duration_seconds', duration, { command: interaction.commandName });
     } catch (error) {
-        console.error(`Error executing /${interaction.commandName}:`, error);
+        const duration = (Date.now() - startTime) / 1000;
+        recordHistogram('command_duration_seconds', duration, { command: interaction.commandName });
+        logger.error(`Error executing command`, {
+            error,
+            commandName: interaction.commandName,
+            userId: interaction.user.id,
+            guildId: interaction.guildId
+        });
         const userMessage = formatError(error);
         if (interaction.deferred || interaction.replied) {
             await interaction.editReply({
@@ -285,7 +300,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
         // Handle raid reactions - AWAIT this
         await handleReactionAdd(reaction, user);
     } catch (error) {
-        console.error('Reaction handler failed:', error);
+        logger.error('Reaction handler failed', { error, userId: user.id, messageId: reaction.message?.id });
         // Optionally DM user about failure
     }
 });
@@ -305,21 +320,21 @@ client.on('messageReactionRemove', async (reaction, user) => {
         // Handle raid reaction removals - AWAIT this
         await handleReactionRemove(reaction, user);
     } catch (error) {
-        console.error('Reaction remove handler failed:', error);
+        logger.error('Reaction remove handler failed', { error, userId: user.id, messageId: reaction.message?.id });
     }
 });
 
 client.on('guildCreate', async (guild) => {
     if (isGuildAllowed(guild.id)) {
-        console.log(`Joined allowed guild: ${guild.name} (${guild.id})`);
+        logger.info(`Joined allowed guild: ${guild.name}`, { guildId: guild.id });
         return;
     }
 
-    console.log(`Leaving unauthorized guild: ${guild.name} (${guild.id})`);
+    logger.warn(`Leaving unauthorized guild: ${guild.name}`, { guildId: guild.id });
     try {
         await guild.leave();
     } catch (error) {
-        console.error('Failed to leave unauthorized guild:', error);
+        logger.error('Failed to leave unauthorized guild', { error, guildId: guild.id });
     }
 });
 

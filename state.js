@@ -1,10 +1,27 @@
 const fs = require('fs');
 const path = require('path');
 const { db, prepare, transaction, initializeSchema } = require('./db/database');
+const { logger } = require('./utils/logger');
+const { incrementCounter, setGauge } = require('./utils/metrics');
 
 const DATA_DIR = path.join(__dirname, 'data');
 function dataPath(filename) {
     return path.join(DATA_DIR, filename);
+}
+
+/**
+ * Safely parse JSON with error handling to prevent crashes from malformed data
+ * @param {string} jsonString - JSON string to parse
+ * @param {any} fallback - Value to return if parsing fails
+ * @returns {any} Parsed object or fallback value
+ */
+function safeJsonParse(jsonString, fallback = null) {
+    try {
+        return jsonString ? JSON.parse(jsonString) : fallback;
+    } catch (error) {
+        logger.warn('Failed to parse JSON, using fallback', { error });
+        return fallback;
+    }
 }
 
 // In-memory caches (for fast access)
@@ -160,7 +177,7 @@ function getStatements() {
 try {
     initializeSchema();
 } catch (error) {
-    console.error('Failed to initialize database schema:', error);
+    logger.error('Failed to initialize database schema', { error });
 }
 
 // ===== RAID CHANNELS =====
@@ -169,7 +186,7 @@ function loadRaidChannels() {
     raidChannels.clear();
     const rows = prepare('SELECT id, raid_channel_id FROM guilds WHERE raid_channel_id IS NOT NULL').all();
     rows.forEach(row => raidChannels.set(row.id, row.raid_channel_id));
-    console.log(`Loaded ${raidChannels.size} raid channel configurations`);
+    logger.info(`Loaded ${raidChannels.size} raid channel configurations`);
 }
 
 function saveRaidChannels() {
@@ -193,7 +210,7 @@ function loadMuseumChannels() {
     museumChannels.clear();
     const rows = prepare('SELECT id, museum_channel_id FROM guilds WHERE museum_channel_id IS NOT NULL').all();
     rows.forEach(row => museumChannels.set(row.id, row.museum_channel_id));
-    console.log(`Loaded ${museumChannels.size} museum channel configurations`);
+    logger.info(`Loaded ${museumChannels.size} museum channel configurations`);
 }
 
 function saveMuseumChannels() {
@@ -217,7 +234,7 @@ function loadKeyChannels() {
     keyChannels.clear();
     const rows = prepare('SELECT id, key_channel_id FROM guilds WHERE key_channel_id IS NOT NULL').all();
     rows.forEach(row => keyChannels.set(row.id, row.key_channel_id));
-    console.log(`Loaded ${keyChannels.size} key channel configurations`);
+    logger.info(`Loaded ${keyChannels.size} key channel configurations`);
 }
 
 function saveKeyChannels() {
@@ -246,7 +263,7 @@ function loadAdminRoles() {
         }
         adminRoles.get(row.guild_id).add(row.role_id);
     });
-    console.log(`Loaded admin role configs for ${adminRoles.size} guilds`);
+    logger.info(`Loaded admin role configs for ${adminRoles.size} guilds`);
 }
 
 function saveAdminRoles() {
@@ -283,7 +300,7 @@ function loadSignupRoles() {
         }
         signupRoles.get(row.guild_id).add(row.role_id);
     });
-    console.log(`Loaded signup role requirements for ${signupRoles.size} guilds`);
+    logger.info(`Loaded signup role requirements for ${signupRoles.size} guilds`);
 }
 
 function saveSignupRoles() {
@@ -324,7 +341,7 @@ function loadCommandRoles() {
         }
         guildMap.get(row.command_name).add(row.role_id);
     });
-    console.log(`Loaded command permissions for ${commandRoles.size} guilds`);
+    logger.info(`Loaded command permissions for ${commandRoles.size} guilds`);
 }
 
 function saveCommandRoles() {
@@ -371,7 +388,7 @@ function loadGuildSettings() {
             threadAutoArchiveMinutes: row.thread_auto_archive_minutes || 1440
         });
     });
-    console.log(`Loaded settings for ${guildSettings.size} guilds`);
+    logger.info(`Loaded settings for ${guildSettings.size} guilds`);
 }
 
 function saveGuildSettings() {
@@ -433,7 +450,7 @@ function loadActiveRaidState() {
         const raidData = reconstructRaidData(raid, signups);
         activeRaids.set(raid.message_id, raidData);
     }
-    console.log(`Loaded ${activeRaids.size} stored raid entries`);
+    logger.info(`Loaded ${activeRaids.size} stored raid entries`);
 }
 
 function reconstructRaidData(raid, signups) {
@@ -468,7 +485,7 @@ function reconstructRaidData(raid, signups) {
         const waitlist = stmts.getMuseumWaitlist.all(raid.message_id);
         raidData.waitlist = waitlist.map(w => w.user_id);
     } else {
-        raidData.template = raid.template_data ? JSON.parse(raid.template_data) : null;
+        raidData.template = safeJsonParse(raid.template_data, null);
         raidData.length = raid.length;
         raidData.strategy = raid.strategy;
 
@@ -589,6 +606,12 @@ function setActiveRaid(messageId, raidData, options = {}) {
 
     // Update in-memory cache
     activeRaids.set(messageId, raidData);
+
+    // Track metrics (only for new raids)
+    if (!existing) {
+        incrementCounter('raids_created_total');
+        setGauge('active_raids_gauge', activeRaids.size);
+    }
 }
 
 function syncSignupsToDb(messageId, raidData) {
@@ -706,7 +729,7 @@ function markActiveRaidUpdated(messageId, options = {}) {
             // Sync signups
             syncSignupsToDb(messageId, raidData);
         } catch (error) {
-            console.error('Transaction failed in markActiveRaidUpdated:', error);
+            logger.error('Transaction failed in markActiveRaidUpdated', { error, messageId });
             throw error; // Triggers rollback
         }
     })();
@@ -725,9 +748,9 @@ function loadRaidStats() {
     globalRows.forEach(row => {
         raidStats.set(row.user_id, {
             totalRaids: row.total_raids,
-            roleCounts: JSON.parse(row.role_counts || '{}'),
-            templateCounts: JSON.parse(row.template_counts || '{}'),
-            weekdayCounts: JSON.parse(row.weekday_counts || '{}'),
+            roleCounts: safeJsonParse(row.role_counts, {}),
+            templateCounts: safeJsonParse(row.template_counts, {}),
+            weekdayCounts: safeJsonParse(row.weekday_counts, {}),
             lastUpdated: row.last_updated,
             lastRaidAt: row.last_raid_at
         });
@@ -741,15 +764,15 @@ function loadRaidStats() {
         }
         guildParticipation.get(row.guild_id).set(row.user_id, {
             totalRaids: row.total_raids,
-            roleCounts: JSON.parse(row.role_counts || '{}'),
-            templateCounts: JSON.parse(row.template_counts || '{}'),
-            weekdayCounts: JSON.parse(row.weekday_counts || '{}'),
+            roleCounts: safeJsonParse(row.role_counts, {}),
+            templateCounts: safeJsonParse(row.template_counts, {}),
+            weekdayCounts: safeJsonParse(row.weekday_counts, {}),
             lastUpdated: row.last_updated,
             lastRaidAt: row.last_raid_at
         });
     });
 
-    console.log(`Loaded stats for ${raidStats.size} users across ${guildParticipation.size} guilds`);
+    logger.info(`Loaded stats for ${raidStats.size} users across ${guildParticipation.size} guilds`);
 }
 
 function saveRaidStats() {
@@ -1036,7 +1059,7 @@ function safeWriteFile(filePath, contents, backupPath) {
     try {
         fs.mkdirSync(directory, { recursive: true });
     } catch (dirError) {
-        console.error(`Failed to ensure directory for ${filePath}:`, dirError);
+        logger.error(`Failed to ensure directory for file`, { error: dirError, filePath });
         return;
     }
 
@@ -1048,19 +1071,19 @@ function safeWriteFile(filePath, contents, backupPath) {
                 fs.copyFileSync(filePath, backupPath);
             } catch (copyError) {
                 if (copyError.code !== 'ENOENT') {
-                    console.error('Failed to create backup file:', copyError);
+                    logger.warn('Failed to create backup file', { error: copyError, filePath });
                 }
             }
         }
         fs.renameSync(tempPath, filePath);
     } catch (error) {
-        console.error(`Failed to write file ${filePath}:`, error);
+        logger.error(`Failed to write file`, { error, filePath });
         try {
             if (error.code === 'ENOENT') {
                 fs.writeFileSync(filePath, contents);
             }
         } catch (fallbackError) {
-            console.error(`Fallback write failed for ${filePath}:`, fallbackError);
+            logger.error(`Fallback write failed`, { error: fallbackError, filePath });
         }
         try {
             if (fs.existsSync(tempPath)) {

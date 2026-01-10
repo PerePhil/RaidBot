@@ -3,6 +3,8 @@ const { updateRaidEmbed, updateMuseumEmbed, updateKeyEmbed } = require('../utils
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
 const { reactionLimiter } = require('../utils/rateLimiter');
 const { Mutex } = require('async-mutex');
+const { logger } = require('../utils/logger');
+const { incrementCounter } = require('../utils/metrics');
 
 // Per-raid mutex locks to prevent race conditions
 const locks = new Map(); // messageId -> Mutex
@@ -16,6 +18,8 @@ function getLock(messageId) {
 
 async function handleReactionAdd(reaction, user) {
     if (user.bot) return;
+
+    incrementCounter('reactions_total', { action: 'add' });
 
     // Rate limit check (before acquiring lock to avoid blocking)
     if (!reactionLimiter.isAllowed(user.id)) {
@@ -32,7 +36,7 @@ async function handleReactionAdd(reaction, user) {
         try {
             await reaction.fetch();
         } catch (error) {
-            console.error('Error fetching reaction:', error);
+            logger.error('Error fetching reaction', { error });
             // Cleanup reaction on fetch failure
             try {
                 await reaction.users.remove(user.id);
@@ -133,7 +137,7 @@ async function handleReactionAdd(reaction, user) {
                 const creator = await reaction.message.client.users.fetch(raidData.creatorId);
                 await creator.send(`Your raid "${raidData.template.name}" (ID: \`${raidData.raidId}\`) is now full!`);
             } catch (error) {
-                console.error('Could not send DM to raid creator:', error);
+                logger.warn('Could not send DM to raid creator', { error });
             }
         }
     } finally {
@@ -144,11 +148,13 @@ async function handleReactionAdd(reaction, user) {
 async function handleReactionRemove(reaction, user) {
     if (user.bot) return;
 
+    incrementCounter('reactions_total', { action: 'remove' });
+
     if (reaction.partial) {
         try {
             await reaction.fetch();
         } catch (error) {
-            console.error('Error fetching reaction:', error);
+            logger.error('Error fetching reaction', { error });
             return;
         }
     }
@@ -321,16 +327,28 @@ async function handleKeyReactionRemove(reaction, user, raidData) {
     }
 }
 
+/**
+ * Clean up the mutex lock for a raid that has been closed
+ * This prevents memory leaks from accumulating locks for historical raids
+ * @param {string} messageId - The message ID of the raid
+ */
+function cleanupRaidLock(messageId) {
+    if (locks.has(messageId)) {
+        locks.delete(messageId);
+    }
+}
+
 module.exports = {
     handleReactionAdd,
-    handleReactionRemove
+    handleReactionRemove,
+    cleanupRaidLock
 };
 
 async function safeDm(user, content) {
     try {
         await user.send(content);
     } catch (error) {
-        console.error('Could not send DM to user:', error);
+        logger.warn('Could not send DM to user', { error });
     }
 }
 
@@ -349,7 +367,7 @@ async function isAllowed(guild, user, type) {
         const allowed = member.roles.cache.some((role) => allowedRoles.has(role.id));
         return { allowed, roles: allowedRoles };
     } catch (error) {
-        console.error('Failed to fetch member for signup role check:', error);
+        logger.warn('Failed to fetch member for signup role check', { error });
         return { allowed: true, roles: allowedRoles }; // be permissive on fetch error
     }
 }
@@ -368,7 +386,7 @@ async function buildRestrictionMessage(guild, roleSet, type = 'raid') {
             const fetched = await guild.roles.fetch();
             fetched.forEach((role) => nameMap.set(role.id, role.name));
         } catch (error) {
-            console.error('Failed to fetch roles while building restriction message:', error);
+            logger.warn('Failed to fetch roles while building restriction message', { error });
         }
     }
 

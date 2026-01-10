@@ -9,6 +9,7 @@ const { raidChannels, museumChannels, setActiveRaid, getActiveRaid, getGuildSett
 const { EmbedBuilder } = require('discord.js');
 const chrono = require('chrono-node');
 const { generateTimestampedId } = require('./utils/idGenerator');
+const { logger } = require('./utils/logger');
 
 // In-memory cache
 const recurringRaids = new Map(); // id -> recurring data
@@ -88,7 +89,7 @@ function loadRecurringRaids() {
         recurringRaids.set(row.id, rowToRecurring(row));
     });
 
-    console.log(`Loaded ${recurringRaids.size} recurring raid schedules`);
+    logger.info(`Loaded ${recurringRaids.size} recurring raid schedules`);
 }
 
 function rowToRecurring(row) {
@@ -310,43 +311,142 @@ function calculateNextScheduledTime(recurring) {
     return Math.floor(spawnTime.getTime() / 1000);
 }
 
+/**
+ * Get a Date object representing the current time in a specific timezone
+ * Uses Intl.DateTimeFormat to handle timezone conversions
+ * @param {Date} date - The date to convert
+ * @param {string} timezone - IANA timezone string (e.g., 'America/New_York')
+ * @returns {Date} Date object with timezone-adjusted values
+ */
+function getDateInTimezone(date, timezone) {
+    try {
+        // Get the date parts in the target timezone
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+
+        const parts = formatter.formatToParts(date);
+        const get = (type) => parts.find(p => p.type === type)?.value;
+
+        return new Date(
+            get('year'),
+            parseInt(get('month')) - 1, // Month is 0-indexed
+            get('day'),
+            get('hour'),
+            get('minute'),
+            get('second')
+        );
+    } catch (error) {
+        logger.error(`Invalid timezone ${timezone}, falling back to local time:`, { error: error.message });
+        return new Date(date);
+    }
+}
+
+/**
+ * Convert a date created in a specific timezone back to local/UTC representation
+ * @param {Date} date - Date with timezone-specific values
+ * @param {string} timezone - IANA timezone string
+ * @returns {Date} Date object adjusted back to local time
+ */
+function convertTimezoneToLocal(date, timezone) {
+    try {
+        // Create a date string in the target timezone
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+
+        // ISO string without timezone
+        const dateStr = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+
+        // Parse as if it's in the target timezone and get UTC
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+
+        // Create a reference date to find the offset
+        const referenceUtc = new Date(dateStr + 'Z'); // Assume UTC
+        const parts = formatter.formatToParts(referenceUtc);
+        const get = (type) => parts.find(p => p.type === type)?.value;
+
+        const tzDate = new Date(
+            get('year'),
+            parseInt(get('month')) - 1,
+            get('day'),
+            get('hour'),
+            get('minute'),
+            get('second')
+        );
+
+        // Calculate offset and adjust
+        const offset = referenceUtc.getTime() - tzDate.getTime();
+        return new Date(Date.parse(dateStr) - offset);
+    } catch (error) {
+        logger.error(`Timezone conversion error for ${timezone}, using date as-is:`, { error: error.message });
+        return date;
+    }
+}
+
 function getNextWeeklyTime(now, dayOfWeek, timeOfDay, tz) {
     const [hours, minutes] = parseTimeOfDay(timeOfDay);
 
-    // Create date in target timezone
-    const target = new Date(now);
+    // Get current time in target timezone
+    const currentInTz = getDateInTimezone(now, tz);
+    const currentDay = currentInTz.getDay();
 
     // Find next occurrence of dayOfWeek
-    const currentDay = now.getDay();
     let daysUntil = (dayOfWeek - currentDay + 7) % 7;
 
-    // If it's today, check if time has passed
+    // If it's today, check if time has passed in the target timezone
     if (daysUntil === 0) {
-        const todayTarget = new Date(now);
+        const todayTarget = new Date(currentInTz);
         todayTarget.setHours(hours, minutes, 0, 0);
-        if (todayTarget <= now) {
+        if (todayTarget <= currentInTz) {
             daysUntil = 7; // Next week
         }
     }
 
+    // Calculate target date in timezone
+    const target = new Date(currentInTz);
     target.setDate(target.getDate() + daysUntil);
     target.setHours(hours, minutes, 0, 0);
 
-    return target;
+    // Convert back to UTC/local for storage
+    return convertTimezoneToLocal(target, tz);
 }
 
 function getNextDailyTime(now, timeOfDay, tz) {
     const [hours, minutes] = parseTimeOfDay(timeOfDay);
 
-    const target = new Date(now);
+    // Get current time in target timezone
+    const currentInTz = getDateInTimezone(now, tz);
+
+    const target = new Date(currentInTz);
     target.setHours(hours, minutes, 0, 0);
 
-    // If time has passed today, use tomorrow
-    if (target <= now) {
+    // If time has passed today in the target timezone, use tomorrow
+    if (target <= currentInTz) {
         target.setDate(target.getDate() + 1);
     }
 
-    return target;
+    // Convert back to UTC/local for storage
+    return convertTimezoneToLocal(target, tz);
 }
 
 function parseTimeOfDay(timeStr) {
@@ -400,7 +500,7 @@ async function checkAndSpawnRecurringRaids(client) {
         // Safeguard: don't spawn if we spawned within the last hour
         const minSpawnInterval = 60 * 60; // 1 hour in seconds
         if (recurring.lastCreatedAt && (now - recurring.lastCreatedAt) < minSpawnInterval) {
-            console.log(`Skipping recurring ${recurring.id}: spawned ${now - recurring.lastCreatedAt}s ago (min: ${minSpawnInterval}s)`);
+            logger.info(`Skipping recurring ${recurring.id}: spawned ${now - recurring.lastCreatedAt}s ago (min: ${minSpawnInterval}s)`);
 
             // Fix the next_scheduled_at to prevent repeated triggering
             const nextScheduled = calculateNextScheduledTime(recurring);
@@ -416,10 +516,10 @@ async function checkAndSpawnRecurringRaids(client) {
         }
 
         try {
-            console.log(`Spawning recurring raid ${recurring.id} (type: ${recurring.scheduleType}, time: ${recurring.timeOfDay})`);
+            logger.info(`Spawning recurring raid ${recurring.id} (type: ${recurring.scheduleType}, time: ${recurring.timeOfDay})`);
             await spawnRaidFromRecurring(client, recurring);
         } catch (error) {
-            console.error(`Failed to spawn recurring raid ${recurring.id}:`, error);
+            logger.error(`Failed to spawn recurring raid ${recurring.id}:`, { error: error });
         }
     }
 }
@@ -466,7 +566,7 @@ async function spawnRaidFromRecurring(client, recurring) {
     }
 
     if (!channelId) {
-        console.warn(`No channel configured for recurring raid ${recurring.id}`);
+        logger.warn(`No channel configured for recurring raid ${recurring.id}`);
         return null;
     }
 
@@ -476,7 +576,7 @@ async function spawnRaidFromRecurring(client, recurring) {
         const guild = await client.guilds.fetch(recurring.guildId);
         channel = await guild.channels.fetch(channelId);
     } catch (error) {
-        console.error(`Failed to fetch channel for recurring raid ${recurring.id}:`, error);
+        logger.error(`Failed to fetch channel for recurring raid ${recurring.id}:`, { error: error });
         return null;
     }
 
@@ -489,7 +589,7 @@ async function spawnRaidFromRecurring(client, recurring) {
     }
 
     if (!template && recurring.templateSlug !== 'museum') {
-        console.error(`Template not found for recurring raid ${recurring.id}: ${recurring.templateSlug}`);
+        logger.error(`Template not found for recurring raid ${recurring.id}: ${recurring.templateSlug}`);
         return null;
     }
 
@@ -590,7 +690,7 @@ async function spawnRaidFromRecurring(client, recurring) {
             }
         }
     } catch (error) {
-        console.error(`Failed to send raid message for recurring ${recurring.id}:`, error);
+        logger.error(`Failed to send raid message for recurring ${recurring.id}:`, { error: error });
         return null;
     }
 
@@ -606,7 +706,7 @@ async function spawnRaidFromRecurring(client, recurring) {
             raidData.threadId = thread.id;
             await thread.send(`💬 Discussion thread for **${threadName}**\n⏰ Raid time: <t:${raidTimestamp}:F>\n🔄 This is a recurring raid.`);
         } catch (error) {
-            console.error(`Failed to create thread for recurring raid ${recurring.id}:`, error);
+            logger.error(`Failed to create thread for recurring raid ${recurring.id}:`, { error: error });
         }
     }
 
@@ -632,7 +732,7 @@ async function spawnRaidFromRecurring(client, recurring) {
     recurring.nextScheduledAt = nextScheduled;
     recurringRaids.set(recurring.id, recurring);
 
-    console.log(`Spawned recurring raid ${recurring.id} -> ${raidId} (message: ${message.id})`);
+    logger.info(`Spawned recurring raid ${recurring.id} -> ${raidId} (message: ${message.id})`);
 
     return { raidData, messageId: message.id };
 }

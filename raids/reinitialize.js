@@ -1,4 +1,5 @@
 const templates = require('../templates');
+const { logger } = require('./utils/logger');
 const {
     activeRaids,
     loadActiveRaidState,
@@ -17,7 +18,7 @@ const {
 } = require('../utils/raidHelpers');
 
 async function reinitializeRaids(client) {
-    console.log('Restoring stored raids...');
+    logger.info('Restoring stored raids...');
     loadActiveRaidState();
 
     let stateChanged = await refreshStoredRaids(client);
@@ -28,7 +29,7 @@ async function reinitializeRaids(client) {
         saveActiveRaidState();
     }
 
-    console.log(`Reinitialized ${activeRaids.size} active raids`);
+    logger.info(`Reinitialized ${activeRaids.size} active raids`);
     await updateBotPresence();
 }
 
@@ -67,12 +68,12 @@ async function refreshStoredRaids(client) {
                 await updateRaidEmbed(message, raidData);
             }
         } catch (error) {
-            console.error('Error syncing stored raid embed:', error);
+            logger.error('Error syncing stored raid embed:', { error: error });
         }
     }
 
     if (removedAny) {
-        console.log('Removed stale raid entries from storage');
+        logger.info('Removed stale raid entries from storage');
     }
 
     return removedAny;
@@ -133,7 +134,7 @@ async function scanForExistingRaids(client) {
                     stateChanged = stateChanged || created;
                 }
             } catch (error) {
-                console.error('Error reinitializing raids:', error);
+                logger.error('Error reinitializing raids:', { error: error });
             }
         }
     }
@@ -171,7 +172,7 @@ async function rebuildMuseumSignup(message, guildId, raidId, creatorId, descript
                 }
             });
         } catch (err) {
-            console.error('Error fetching museum reaction users:', err);
+            logger.error('Error fetching museum reaction users:', { error: err });
         }
     }
 
@@ -200,7 +201,7 @@ async function rebuildMuseumSignup(message, guildId, raidId, creatorId, descript
     setActiveRaid(message.id, raidRecord, { persist: false });
 
     await updateMuseumEmbed(message, raidRecord);
-    console.log(`Reinitialized museum signup ${raidId} with ${signups.length} signups`);
+    logger.info(`Reinitialized museum signup ${raidId} with ${signups.length} signups`);
     return true;
 }
 
@@ -243,7 +244,7 @@ async function rebuildRaidSignup(message, guildId, raidId, creatorId, template, 
                         }
                     });
                 } catch (err) {
-                    console.error('Error fetching reaction users:', err);
+                    logger.error('Error fetching reaction users:', { error: err });
                 }
             }
 
@@ -285,7 +286,7 @@ async function rebuildRaidSignup(message, guildId, raidId, creatorId, template, 
 
     await updateRaidEmbed(message, raidRecord);
     const filled = allRoles.reduce((sum, r) => sum + r.users.length, 0);
-    console.log(`Reinitialized raid ${raidId} with ${filled} signups`);
+    logger.info(`Reinitialized raid ${raidId} with ${filled} signups`);
     return true;
 }
 

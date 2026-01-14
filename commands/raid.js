@@ -8,6 +8,7 @@ const {
     TextInputBuilder,
     TextInputStyle,
     StringSelectMenuBuilder,
+    UserSelectMenuBuilder,
     MessageFlags
 } = require('discord.js');
 const {
@@ -19,8 +20,9 @@ const {
 } = require('../utils/raidHelpers');
 const { buildMessageLink } = require('../utils/raidFormatters');
 const { updateBotPresence } = require('../presence');
-const { activeRaids, deleteActiveRaid, markActiveRaidUpdated } = require('../state');
+const { activeRaids, deleteActiveRaid, markActiveRaidUpdated, recordNoShow, clearNoShow, guildParticipation } = require('../state');
 const { sendAuditLog } = require('../auditLog');
+const { usersAvailableAt } = require('../availabilityManager');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -88,6 +90,12 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
             if (action === 'length') {
                 return showLengthSelect(i, raidEntry, msgId);
             }
+            if (action === 'noshow') {
+                return showNoShowSelect(i, raidEntry, msgId);
+            }
+            if (action === 'findsub') {
+                return showFindSubSelect(i, raidEntry, msgId);
+            }
             return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
         } catch (error) {
             console.error('Collector handler error:', error);
@@ -100,7 +108,7 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
         const disabledRow = new ActionRowBuilder().addComponents(
             ...buttons.components.map((btn) => ButtonBuilder.from(btn.data).setDisabled(true))
         );
-        await replyMessage.edit({ components: [disabledRow] }).catch(() => {});
+        await replyMessage.edit({ components: [disabledRow] }).catch(() => { });
     });
 }
 
@@ -143,16 +151,16 @@ async function closeRaid(interaction, context = {}) {
     ].filter(Boolean);
 
     await respond(interaction, replyLines.join('\n'));
-        await sendAuditLog(interaction.guild, `Raid ${raidId} closed`, {
-            title: 'Raid Closed',
-            color: 0xED4245,
-            fields: [
-                { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
-                { name: 'Raid ID', value: raidId, inline: true },
-                link ? { name: 'Message', value: link, inline: false } : null
-            ].filter(Boolean),
-            components: link ? [makePanelButton(link)] : undefined
-        });
+    await sendAuditLog(interaction.guild, `Raid ${raidId} closed`, {
+        title: 'Raid Closed',
+        color: 0xED4245,
+        fields: [
+            { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'Raid ID', value: raidId, inline: true },
+            link ? { name: 'Message', value: link, inline: false } : null
+        ].filter(Boolean),
+        components: link ? [makePanelButton(link)] : undefined
+    });
     if (context.updatePanel) {
         await refreshPanel(interaction, raidData, messageId);
     }
@@ -202,16 +210,16 @@ async function reopenRaid(interaction, context = {}) {
     ].filter(Boolean);
 
     await respond(interaction, replyLines.join('\n'));
-        await sendAuditLog(interaction.guild, `Raid ${raidId} reopened`, {
-            title: 'Raid Reopened',
-            color: 0x57F287,
-            fields: [
-                { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
-                { name: 'Raid ID', value: raidId, inline: true },
-                link ? { name: 'Message', value: link, inline: false } : null
-            ].filter(Boolean),
-            components: link ? [makePanelButton(link)] : undefined
-        });
+    await sendAuditLog(interaction.guild, `Raid ${raidId} reopened`, {
+        title: 'Raid Reopened',
+        color: 0x57F287,
+        fields: [
+            { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'Raid ID', value: raidId, inline: true },
+            link ? { name: 'Message', value: link, inline: false } : null
+        ].filter(Boolean),
+        components: link ? [makePanelButton(link)] : undefined
+    });
     if (context.updatePanel) {
         await refreshPanel(interaction, raidData, messageId);
     }
@@ -470,7 +478,7 @@ function buildPanelEmbed(raidId, raidData, messageId) {
 
 function buildPanelComponents(messageId, raidData) {
     const isMuseumOrKey = raidData?.type === 'museum' || raidData?.type === 'key';
-    return new ActionRowBuilder().addComponents(
+    const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`raid:close:${messageId}`)
             .setLabel('Close')
@@ -495,16 +503,33 @@ function buildPanelComponents(messageId, raidData) {
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(isMuseumOrKey)
     );
+
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`raid:noshow:${messageId}`)
+            .setLabel('Mark No-Show')
+            .setEmoji('❌')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(!raidData?.closed), // Only enabled when raid is closed
+        new ButtonBuilder()
+            .setCustomId(`raid:findsub:${messageId}`)
+            .setLabel('Find Sub')
+            .setEmoji('🔍')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(isMuseumOrKey) // Disabled for museum/key (no roles)
+    );
+
+    return [row1, row2];
 }
 
 async function refreshPanel(interaction, raidData, messageId) {
     try {
         const embed = buildPanelEmbed(raidData.raidId, raidData, messageId);
-        const components = [buildPanelComponents(messageId, raidData)];
+        const components = buildPanelComponents(messageId, raidData);
         if (interaction.message) {
-            await interaction.message.edit({ embeds: [embed], components }).catch(() => {});
+            await interaction.message.edit({ embeds: [embed], components }).catch(() => { });
         } else {
-            await interaction.editReply({ embeds: [embed], components }).catch(() => {});
+            await interaction.editReply({ embeds: [embed], components }).catch(() => { });
         }
     } catch (error) {
         console.error('Failed to refresh raid panel:', error);
@@ -514,20 +539,237 @@ async function refreshPanel(interaction, raidData, messageId) {
 async function disablePanel(interaction) {
     try {
         if (interaction.message) {
-            const row = new ActionRowBuilder().addComponents(
+            const row1 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('raid:close:disabled').setLabel('Close').setStyle(ButtonStyle.Danger).setDisabled(true),
                 new ButtonBuilder().setCustomId('raid:reopen:disabled').setLabel('Reopen').setStyle(ButtonStyle.Success).setDisabled(true),
                 new ButtonBuilder().setCustomId('raid:delete:disabled').setLabel('Delete').setStyle(ButtonStyle.Secondary).setDisabled(true),
                 new ButtonBuilder().setCustomId('raid:time:disabled').setLabel('Change Time').setStyle(ButtonStyle.Primary).setDisabled(true),
                 new ButtonBuilder().setCustomId('raid:length:disabled').setLabel('Change Length').setStyle(ButtonStyle.Secondary).setDisabled(true)
             );
-            await interaction.message.edit({ components: [row] }).catch(() => {});
+            const row2 = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('raid:noshow:disabled').setLabel('Mark No-Show').setEmoji('❌').setStyle(ButtonStyle.Secondary).setDisabled(true),
+                new ButtonBuilder().setCustomId('raid:findsub:disabled').setLabel('Find Sub').setEmoji('🔍').setStyle(ButtonStyle.Primary).setDisabled(true)
+            );
+            await interaction.message.edit({ components: [row1, row2] }).catch(() => { });
         } else {
-            await interaction.editReply({ components: [] }).catch(() => {});
+            await interaction.editReply({ components: [] }).catch(() => { });
         }
     } catch (error) {
         console.error('Failed to disable raid panel:', error);
     }
+}
+
+async function showNoShowSelect(interaction, raidData, messageId) {
+    if (!raidData.closed) {
+        return interaction.reply({
+            content: 'You can only mark no-shows after a raid is closed.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Collect all signed up users
+    const participants = [];
+    if (raidData.type === 'museum' || raidData.type === 'key') {
+        raidData.signups?.forEach(userId => participants.push(userId));
+    } else {
+        raidData.signups?.forEach(role => {
+            role.users?.forEach(userId => participants.push(userId));
+        });
+    }
+
+    if (participants.length === 0) {
+        return interaction.reply({
+            content: 'No participants to mark as no-shows.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const selectMenu = new UserSelectMenuBuilder()
+        .setCustomId(`raid:noshowSelect:${messageId}`)
+        .setPlaceholder('Select user(s) who did not show up')
+        .setMinValues(1)
+        .setMaxValues(Math.min(participants.length, 25));
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    await interaction.reply({
+        content: '**Select the user(s) who did not attend this raid:**\n(They will have their no-show count incremented)',
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
+
+    const selectInteraction = await interaction.channel.awaitMessageComponent({
+        filter: (i) => i.customId === `raid:noshowSelect:${messageId}` && i.user.id === interaction.user.id,
+        time: 60000
+    }).catch(() => null);
+
+    if (!selectInteraction) {
+        return interaction.editReply({ content: 'Selection timed out.', components: [] });
+    }
+
+    const selectedUsers = selectInteraction.values;
+    const results = [];
+
+    for (const userId of selectedUsers) {
+        // Verify user was actually signed up
+        if (!participants.includes(userId)) {
+            results.push(`<@${userId}> was not signed up for this raid`);
+            continue;
+        }
+
+        const isNew = recordNoShow(messageId, raidData.guildId, userId, interaction.user.id);
+        if (isNew) {
+            results.push(`✓ <@${userId}> marked as no-show`);
+        } else {
+            results.push(`<@${userId}> was already marked as no-show`);
+        }
+    }
+
+    await selectInteraction.update({
+        content: `**No-Show Results:**\n${results.join('\n')}`,
+        components: []
+    });
+
+    // Audit log
+    await sendAuditLog(selectInteraction.guild, `No-shows marked for raid ${raidData.raidId}`, {
+        title: 'No-Shows Marked',
+        color: 0xED4245,
+        fields: [
+            { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'Raid ID', value: raidData.raidId || 'Unknown', inline: true },
+            { name: 'Users', value: selectedUsers.map(id => `<@${id}>`).join(', '), inline: false }
+        ]
+    });
+}
+
+async function showFindSubSelect(interaction, raidData, messageId) {
+    if (raidData.type === 'museum' || raidData.type === 'key') {
+        return interaction.reply({
+            content: 'Find Sub is not available for museum or key boss signups.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Build role options from the raid's signups
+    const roleOptions = raidData.signups
+        .filter(role => role.name)
+        .map(role => ({
+            label: role.name,
+            value: role.name,
+            emoji: role.emoji || undefined
+        }));
+
+    if (roleOptions.length === 0) {
+        return interaction.reply({
+            content: 'No roles found in this raid.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`raid:findsubRole:${messageId}`)
+        .setPlaceholder('Select role to find subs for')
+        .addOptions(roleOptions);
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    await interaction.reply({
+        content: '**Select the role you need a substitute for:**',
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
+
+    const selectInteraction = await interaction.channel.awaitMessageComponent({
+        filter: (i) => i.customId === `raid:findsubRole:${messageId}` && i.user.id === interaction.user.id,
+        time: 60000
+    }).catch(() => null);
+
+    if (!selectInteraction) {
+        return interaction.editReply({ content: 'Selection timed out.', components: [] });
+    }
+
+    const selectedRole = selectInteraction.values[0];
+    const guildId = raidData.guildId;
+
+    // Get all guild members with role experience
+    const guildStats = guildParticipation.get(guildId);
+    if (!guildStats || guildStats.size === 0) {
+        return selectInteraction.update({
+            content: 'No participation data found for this server.',
+            components: []
+        });
+    }
+
+    // Collect who's already signed up
+    const alreadySignedUp = new Set();
+    raidData.signups.forEach(role => {
+        role.users?.forEach(userId => alreadySignedUp.add(userId));
+        role.waitlist?.forEach(userId => alreadySignedUp.add(userId));
+    });
+
+    // Find users with experience in this role
+    const candidates = [];
+    for (const [userId, stats] of guildStats.entries()) {
+        if (alreadySignedUp.has(userId)) continue;
+
+        const roleCount = stats.roleCounts?.[selectedRole] || 0;
+        if (roleCount > 0) {
+            candidates.push({
+                userId,
+                roleCount,
+                totalRaids: stats.totalRaids || 0,
+                lastRaidAt: stats.lastRaidAt
+            });
+        }
+    }
+
+    // Check availability if raid has a timestamp
+    let availableUserIds = null;
+    if (raidData.timestamp) {
+        availableUserIds = new Set(usersAvailableAt(guildId, raidData.timestamp));
+    }
+
+    // Score and sort candidates
+    const scoredCandidates = candidates.map(c => {
+        let score = c.roleCount * 10; // Weight role experience heavily
+        score += Math.min(c.totalRaids, 50); // Cap total raids contribution
+        if (availableUserIds && availableUserIds.has(c.userId)) {
+            score += 100; // Big bonus for availability
+            c.available = true;
+        }
+        // Recency bonus
+        if (c.lastRaidAt && Date.now() - c.lastRaidAt < 14 * 24 * 60 * 60 * 1000) {
+            score += 20; // Active in last 2 weeks
+        }
+        c.score = score;
+        return c;
+    }).sort((a, b) => b.score - a.score);
+
+    const top5 = scoredCandidates.slice(0, 5);
+
+    if (top5.length === 0) {
+        return selectInteraction.update({
+            content: `No users found with experience in **${selectedRole}** who aren't already signed up.`,
+            components: []
+        });
+    }
+
+    const lines = top5.map((c, idx) => {
+        const availTag = c.available ? ' ✅ available' : '';
+        return `**${idx + 1}.** <@${c.userId}> — ${c.roleCount}x ${selectedRole}, ${c.totalRaids} total raids${availTag}`;
+    });
+
+    const embed = new EmbedBuilder()
+        .setTitle(`🔍 Substitute Candidates for ${selectedRole}`)
+        .setDescription(lines.join('\n'))
+        .setColor(0x5865F2)
+        .setFooter({ text: raidData.timestamp ? 'Sorted by role experience + availability' : 'Sorted by role experience' });
+
+    return selectInteraction.update({
+        content: null,
+        embeds: [embed],
+        components: []
+    });
 }
 
 function makePanelButton(link) {

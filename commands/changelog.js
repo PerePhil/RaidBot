@@ -3,42 +3,53 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('changelog')
-        .setDescription('Show recent changes (Release 12)'),
+        .setDescription('Show recent changes (Release 13)'),
     async execute(interaction) {
         const embed = new EmbedBuilder()
-            .setTitle('Release 12 Changelog')
-            .setDescription('Performance monitoring and alerting system for bot owners.')
+            .setTitle('Release 13 Changelog')
+            .setDescription('Raid history, no-show tracking, smart substitute finder, and leaderboards!')
             .addFields(
                 {
-                    name: '📊 Performance Monitoring',
+                    name: '📜 Raid History',
                     value: [
-                        '• Real-time metrics tracking (command latency, reaction times)',
-                        '• Circuit breaker protection for Discord API and DM delivery',
-                        '• `/ping` now shows bot health, latency, uptime, and active raid count'
+                        '• `/raidinfo action:history [user] [limit]` — View past raids you participated in',
+                        '• Shows raid type, role played, and date',
+                        '• Admins can view history for other users'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '🔔 DM-Based Alerts',
+                    name: '❌ No-Show Tracking',
                     value: [
-                        '• Bot owner receives DM alerts for performance issues',
-                        '• Alerts for: high latency, DM failures, memory issues, circuit breaker trips',
-                        '• Daily health report sent at 9 AM with bot stats',
-                        '• Set `BOT_OWNER_ID` in config to enable alerts'
+                        '• Mark no-shows via the `/raid` panel after a raid closes',
+                        '• No-show count shown in `/stats user`',
+                        '• "Reliable" achievement for perfect attendance'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: '🧪 /testalert Command',
+                    name: '🔍 Smart Substitute Finder',
                     value: [
-                        '• Send a test alert to verify the DM alert system is working',
-                        '• Admin-only command for troubleshooting'
+                        '• "Find Sub" button in `/raid` panel',
+                        '• Finds users with experience in the needed role',
+                        '• Prioritizes users who are available at raid time',
+                        '• Shows top 5 candidates ranked by fit'
                     ].join('\n'),
                     inline: false
                 },
                 {
-                    name: 'Previous (Release 11)',
-                    value: 'Inactive member filtering with weeks parameter, waitlist activity tracking',
+                    name: '🏆 Leaderboards & Achievements',
+                    value: [
+                        '• `/leaderboard top` — Top raiders by total raids',
+                        '• `/leaderboard role <name>` — Top players for a specific role',
+                        '• `/leaderboard achievements` — View unlocked achievements',
+                        '• 11 achievements to unlock (Rookie Raider → Raid Master)'
+                    ].join('\n'),
+                    inline: false
+                },
+                {
+                    name: 'Previous (Release 12)',
+                    value: 'Performance monitoring, DM-based alerts, /testalert command',
                     inline: false
                 }
             );

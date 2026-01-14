@@ -168,7 +168,25 @@ function getStatements() {
         deleteSignupRoles: prepare('DELETE FROM signup_roles WHERE guild_id = ?'),
 
         // Ensure guild exists
-        ensureGuild: prepare('INSERT OR IGNORE INTO guilds (id) VALUES (?)')
+        ensureGuild: prepare('INSERT OR IGNORE INTO guilds (id) VALUES (?)'),
+
+        // No-show tracking
+        recordAttendance: prepare(`
+            INSERT INTO raid_attendance (message_id, user_id, attended, marked_by, marked_at)
+            VALUES (@message_id, @user_id, @attended, @marked_by, @marked_at)
+            ON CONFLICT(message_id, user_id) DO UPDATE SET
+                attended = excluded.attended,
+                marked_by = excluded.marked_by,
+                marked_at = excluded.marked_at
+        `),
+        getAttendance: prepare('SELECT * FROM raid_attendance WHERE message_id = ? AND user_id = ?'),
+        incrementNoShows: prepare(`
+            UPDATE guild_user_stats SET no_shows = COALESCE(no_shows, 0) + 1 WHERE guild_id = ? AND user_id = ?
+        `),
+        decrementNoShows: prepare(`
+            UPDATE guild_user_stats SET no_shows = MAX(0, COALESCE(no_shows, 0) - 1) WHERE guild_id = ? AND user_id = ?
+        `),
+        getNoShowCount: prepare('SELECT no_shows FROM guild_user_stats WHERE guild_id = ? AND user_id = ?')
     };
 
     return statements;
@@ -1105,6 +1123,82 @@ function safeWriteFile(filePath, contents, backupPath) {
     }
 }
 
+/**
+ * Record a no-show for a user in a specific raid.
+ * @param {string} messageId - The raid message ID
+ * @param {string} guildId - The guild ID
+ * @param {string} userId - The user who didn't show
+ * @param {string} markedBy - The admin who marked them as no-show
+ * @returns {boolean} True if this is a new no-show (not previously marked)
+ */
+function recordNoShow(messageId, guildId, userId, markedBy) {
+    const stmts = getStatements();
+    const now = Math.floor(Date.now() / 1000);
+
+    // Check if already marked
+    const existing = stmts.getAttendance.get(messageId, userId);
+    const wasAlreadyNoShow = existing && existing.attended === 0;
+
+    // Record attendance as no-show
+    stmts.recordAttendance.run({
+        message_id: messageId,
+        user_id: userId,
+        attended: 0,
+        marked_by: markedBy,
+        marked_at: now
+    });
+
+    // Only increment no-show count if this is a new no-show
+    if (!wasAlreadyNoShow) {
+        stmts.incrementNoShows.run(guildId, userId);
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Remove a no-show record (if admin made a mistake)
+ * @param {string} messageId - The raid message ID
+ * @param {string} guildId - The guild ID
+ * @param {string} userId - The user to clear
+ * @returns {boolean} True if a no-show was cleared
+ */
+function clearNoShow(messageId, guildId, userId) {
+    const stmts = getStatements();
+
+    // Check if currently a no-show
+    const existing = stmts.getAttendance.get(messageId, userId);
+    if (!existing || existing.attended !== 0) {
+        return false;
+    }
+
+    // Mark as attended
+    stmts.recordAttendance.run({
+        message_id: messageId,
+        user_id: userId,
+        attended: 1,
+        marked_by: null,
+        marked_at: null
+    });
+
+    // Decrement no-show count
+    stmts.decrementNoShows.run(guildId, userId);
+    return true;
+}
+
+/**
+ * Get the no-show count for a user in a guild.
+ * @param {string} guildId - The guild ID
+ * @param {string} userId - The user ID
+ * @returns {number} The no-show count
+ */
+function getNoShowCount(guildId, userId) {
+    const stmts = getStatements();
+    const row = stmts.getNoShowCount.get(guildId, userId);
+    return row?.no_shows || 0;
+}
+
 module.exports = {
     activeRaids,
     raidChannels,
@@ -1151,6 +1245,9 @@ module.exports = {
     getUserStats,
     getGuildUserStats,
     saveRaidStats,
+    recordNoShow,
+    clearNoShow,
+    getNoShowCount,
     safeWriteFile,
     dataPath,
     DATA_DIR

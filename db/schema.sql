@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS museum_waitlist (
 CREATE TABLE IF NOT EXISTS user_stats (
   user_id TEXT PRIMARY KEY,
   total_raids INTEGER DEFAULT 0,
+  no_shows INTEGER DEFAULT 0,
   role_counts TEXT,        -- JSON object
   template_counts TEXT,    -- JSON object
   weekday_counts TEXT,     -- JSON object
@@ -92,12 +93,24 @@ CREATE TABLE IF NOT EXISTS guild_user_stats (
   guild_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   total_raids INTEGER DEFAULT 0,
+  no_shows INTEGER DEFAULT 0,
   role_counts TEXT,
   template_counts TEXT,
   weekday_counts TEXT,
   last_updated INTEGER,
   last_raid_at INTEGER,
   PRIMARY KEY (guild_id, user_id)
+);
+
+-- Raid attendance tracking (no-shows)
+CREATE TABLE IF NOT EXISTS raid_attendance (
+  message_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  attended INTEGER DEFAULT 1,  -- 1 = attended, 0 = no-show
+  marked_by TEXT,              -- Admin who marked the no-show
+  marked_at INTEGER,           -- Timestamp
+  PRIMARY KEY (message_id, user_id),
+  FOREIGN KEY (message_id) REFERENCES raids(message_id) ON DELETE CASCADE
 );
 
 -- Admin roles per guild

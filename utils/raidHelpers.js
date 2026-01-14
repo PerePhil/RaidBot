@@ -564,6 +564,64 @@ function findRaidByIdInGuild(guild, raidId) {
     return null;
 }
 
+/**
+ * Get a user's raid participation history from the database
+ * @param {string} guildId - Guild ID
+ * @param {string} userId - User ID to get history for
+ * @param {number} limit - Max number of raids to return
+ * @returns {Array} Array of raid history entries
+ */
+function getRaidHistory(guildId, userId, limit = 10) {
+    const { db } = require('../db/database');
+
+    // Query closed raids where the user signed up
+    const query = `
+        SELECT 
+            r.raid_id,
+            r.type,
+            r.template_data,
+            r.timestamp,
+            r.closed_at,
+            s.role_name
+        FROM raids r
+        JOIN signups s ON r.message_id = s.message_id
+        WHERE r.guild_id = ?
+          AND s.user_id = ?
+          AND r.closed_at IS NOT NULL
+          AND s.is_waitlist = 0
+        ORDER BY COALESCE(r.timestamp, r.closed_at) DESC
+        LIMIT ?
+    `;
+
+    try {
+        const rows = db.prepare(query).all(guildId, userId, limit);
+
+        return rows.map(row => {
+            let templateName = null;
+            if (row.template_data) {
+                try {
+                    const template = JSON.parse(row.template_data);
+                    templateName = template.name;
+                } catch {
+                    // Ignore parse errors
+                }
+            }
+
+            return {
+                raidId: row.raid_id,
+                type: row.type,
+                templateName,
+                timestamp: row.timestamp,
+                closedAt: row.closed_at,
+                roleName: row.role_name
+            };
+        });
+    } catch (error) {
+        console.error('Failed to query raid history:', error);
+        return [];
+    }
+}
+
 module.exports = {
     getRaidSignupChannel,
     getMuseumSignupChannel,
@@ -577,5 +635,7 @@ module.exports = {
     findRaidByIdInGuild,
     closeRaidSignup,
     reopenRaidSignup,
-    isRaidFull
+    isRaidFull,
+    getRaidHistory
 };
+

@@ -100,6 +100,17 @@ const CATEGORIES = {
             { name: '/availability post-button', desc: 'Post a persistent "Set Availability" button for onboarding.' }
         ]
     },
+    leaderboard: {
+        title: 'Leaderboards & Achievements',
+        description: 'Commands for viewing raid rankings and achievements.',
+        color: 0xFFD700,
+        commands: [
+            { name: '/leaderboard top', desc: 'View top raiders by total raids completed.' },
+            { name: '/leaderboard role <role_name>', desc: 'View top raiders for a specific role (e.g., Hunter).' },
+            { name: '/leaderboard achievements [user]', desc: 'View achievements for yourself or another user.' },
+            { name: '/raidinfo action:history [user] [limit]', desc: 'View past raids a user participated in.' }
+        ]
+    },
     polls: {
         title: 'Polling (Admin)',
         description: 'Commands for creating time slot polls.',

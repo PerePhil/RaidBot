@@ -73,7 +73,23 @@ function runMigrations() {
         { table: 'raids', column: 'auto_close_executed', sql: 'ALTER TABLE raids ADD COLUMN auto_close_executed INTEGER DEFAULT 0' },
         // Stats tracking persistence (added Jan 2025)
         { table: 'raids', column: 'stats_recorded', sql: 'ALTER TABLE raids ADD COLUMN stats_recorded INTEGER DEFAULT 0' },
+        // No-show tracking (added Jan 2025)
+        { table: 'guild_user_stats', column: 'no_shows', sql: 'ALTER TABLE guild_user_stats ADD COLUMN no_shows INTEGER DEFAULT 0' },
+        { table: 'user_stats', column: 'no_shows', sql: 'ALTER TABLE user_stats ADD COLUMN no_shows INTEGER DEFAULT 0' },
     ];
+
+    // Create raid_attendance table if it doesn't exist
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS raid_attendance (
+            message_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            attended INTEGER DEFAULT 1,
+            marked_by TEXT,
+            marked_at INTEGER,
+            PRIMARY KEY (message_id, user_id),
+            FOREIGN KEY (message_id) REFERENCES raids(message_id) ON DELETE CASCADE
+        )
+    `);
 
     for (const migration of migrations) {
         if (!columnExists(migration.table, migration.column)) {

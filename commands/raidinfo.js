@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
-const { activeRaids } = require('../state');
-const { findRaidByIdInGuild } = require('../utils/raidHelpers');
+const { activeRaids, getAdminRoles, getCommandRoles } = require('../state');
+const { findRaidByIdInGuild, getRaidHistory } = require('../utils/raidHelpers');
 const {
     formatRaidType,
     formatSignupCounts,
@@ -20,11 +20,22 @@ module.exports = {
                 .addChoices(
                     { name: 'list', value: 'list' },
                     { name: 'detail', value: 'detail' },
-                    { name: 'export', value: 'export' }
+                    { name: 'export', value: 'export' },
+                    { name: 'history', value: 'history' }
                 ))
         .addStringOption((option) =>
             option.setName('raid_id')
                 .setDescription('Raid ID shown at the bottom of the signup embed (required for detail)')
+                .setRequired(false))
+        .addUserOption((option) =>
+            option.setName('user')
+                .setDescription('User to view history for (default: yourself)')
+                .setRequired(false))
+        .addIntegerOption((option) =>
+            option.setName('limit')
+                .setDescription('Number of raids to show in history (default: 10)')
+                .setMinValue(1)
+                .setMaxValue(50)
                 .setRequired(false))
         .addIntegerOption((option) =>
             option.setName('days')
@@ -42,6 +53,9 @@ module.exports = {
         }
         if (action === 'export') {
             return exportCalendar(interaction);
+        }
+        if (action === 'history') {
+            return showHistory(interaction);
         }
         return interaction.reply({
             content: 'Unsupported action.',
@@ -246,3 +260,65 @@ function escapeText(text) {
         .replace(/,/g, '\\,')
         .replace(/;/g, '\\;');
 }
+
+async function showHistory(interaction) {
+    const targetUser = interaction.options.getUser('user') || interaction.user;
+    const limit = interaction.options.getInteger('limit') || 10;
+    const guildId = interaction.guildId;
+
+    // Check if viewing another user's history (requires admin)
+    if (targetUser.id !== interaction.user.id) {
+        const isAdmin = interaction.memberPermissions?.has('ManageGuild');
+        const adminRoles = getAdminRoles(guildId);
+        const commandRoles = getCommandRoles(guildId, 'stats');
+        const memberRoles = interaction.member?.roles?.cache?.map(r => r.id) || [];
+        const hasAdminRole = [...adminRoles, ...commandRoles].some(r => memberRoles.includes(r));
+
+        if (!isAdmin && !hasAdminRole) {
+            return interaction.reply({
+                content: 'You need admin permissions to view another user\'s raid history.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const history = getRaidHistory(guildId, targetUser.id, limit);
+
+    if (history.length === 0) {
+        return interaction.editReply({
+            content: `${targetUser.id === interaction.user.id ? 'You have' : `<@${targetUser.id}> has`} no raid history in this server.`
+        });
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`Raid History for ${targetUser.displayName || targetUser.username}`)
+        .setThumbnail(targetUser.displayAvatarURL())
+        .setFooter({ text: `Showing ${history.length} most recent raids` });
+
+    const lines = history.map((entry, index) => {
+        const date = entry.timestamp
+            ? `<t:${entry.timestamp}:d>`
+            : entry.closedAt
+                ? `<t:${entry.closedAt}:d>`
+                : 'Unknown date';
+        const templateName = entry.templateName || (entry.type === 'museum' ? 'Museum' : 'Raid');
+        const role = entry.roleName || '-';
+        return `**${index + 1}.** ${templateName} • ${role} • ${date}`;
+    });
+
+    // Split into chunks if too long
+    const chunkSize = 15;
+    for (let i = 0; i < lines.length; i += chunkSize) {
+        const chunk = lines.slice(i, i + chunkSize);
+        embed.addFields({
+            name: i === 0 ? 'Recent Raids' : '\u200b',
+            value: chunk.join('\n'),
+            inline: false
+        });
+    }
+
+    return interaction.editReply({ embeds: [embed] });
+}
+

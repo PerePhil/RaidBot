@@ -5,7 +5,7 @@ const {
     exportToCSV,
     getAttendanceRate
 } = require('../utils/analytics');
-const { getGuildUserStats, guildParticipation, getAdminRoles, getCommandRoles } = require('../state');
+const { getGuildUserStats, guildParticipation, getAdminRoles, getCommandRoles, getNoShowCount } = require('../state');
 const { getAvailability } = require('../availabilityManager');
 
 module.exports = {
@@ -130,12 +130,18 @@ async function handleUserStats(interaction) {
 
     const attendanceEmoji = attendanceRate >= 0.9 ? '🌟' : attendanceRate >= 0.7 ? '✅' : attendanceRate >= 0.5 ? '⚠️' : '❌';
 
+    // Get no-show count
+    const noShows = guildId ? getNoShowCount(guildId, target.id) : 0;
+    const noShowRate = guildStats.totalRaids > 0 ? (noShows / guildStats.totalRaids * 100).toFixed(1) : 0;
+    const noShowEmoji = noShows === 0 ? '✅' : noShowRate > 20 ? '⚠️' : '';
+
     const embed = new EmbedBuilder()
         .setTitle(`${target.username}'s Stats`)
         .setColor(attendanceRate >= 0.7 ? 0x57F287 : attendanceRate >= 0.5 ? 0xFEE75C : 0xED4245)
         .addFields(
             { name: 'Total Raids', value: String(guildStats.totalRaids), inline: true },
             { name: 'Attendance', value: `${attendanceEmoji} ${percentage}%`, inline: true },
+            { name: 'No-Shows', value: noShows > 0 ? `${noShowEmoji} ${noShows} (${noShowRate}%)` : '✅ 0', inline: true },
             { name: 'Favorite Role', value: favoriteRole ? `${favoriteRole.key} (${favoriteRole.count})` : '—', inline: true },
             { name: 'Favorite Raid Type', value: favoriteTemplate ? `${favoriteTemplate.key} (${favoriteTemplate.count})` : '—', inline: true },
             { name: 'Most Active Day', value: dayLabel, inline: true }

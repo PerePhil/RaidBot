@@ -12,6 +12,7 @@ const { deriveSlug } = require('../templatesManager');
 const {
     updateRaidEmbed,
     updateMuseumEmbed,
+    updateKeyEmbed,
     getRaidSignupChannel,
     getMuseumSignupChannel,
     fetchRaidMessage
@@ -62,9 +63,15 @@ async function refreshStoredRaids(client) {
         }
 
         try {
+            // Sync reactions from message with stored data (catches reactions added while bot was offline)
             if (raidData.type === 'museum') {
+                await syncMuseumReactions(message, raidData);
                 await updateMuseumEmbed(message, raidData);
+            } else if (raidData.type === 'key') {
+                await syncKeyReactions(message, raidData);
+                await updateKeyEmbed(message, raidData);
             } else {
+                await syncRaidReactions(message, raidData);
                 await updateRaidEmbed(message, raidData);
             }
         } catch (error) {
@@ -288,6 +295,102 @@ async function rebuildRaidSignup(message, guildId, raidId, creatorId, template, 
     const filled = allRoles.reduce((sum, r) => sum + r.users.length, 0);
     logger.info(`Reinitialized raid ${raidId} with ${filled} signups`);
     return true;
+}
+
+/**
+ * Syncs reactions from a raid message with stored raid data.
+ * This catches reactions added while the bot was offline.
+ */
+async function syncRaidReactions(message, raidData) {
+    if (!raidData.signups || !Array.isArray(raidData.signups)) {
+        return;
+    }
+
+    for (const role of raidData.signups) {
+        const reaction = message.reactions.cache.find((r) => r.emoji.name === role.emoji);
+        if (!reaction) continue;
+
+        try {
+            if (reaction.partial) await reaction.fetch();
+            const userCollection = await reaction.users.fetch();
+            const reactionUserIds = [];
+
+            userCollection.forEach((reactUser) => {
+                if (!reactUser.bot && !reactionUserIds.includes(reactUser.id)) {
+                    reactionUserIds.push(reactUser.id);
+                }
+            });
+
+            // Merge reaction users with stored users (reactions take precedence for active signups)
+            const combinedUsers = mergeUniqueUsers(reactionUserIds, role.users || []);
+
+            // Filter waitlist to exclude users now in active signups
+            const waitlist = (role.waitlist || []).filter((userId) => !combinedUsers.includes(userId));
+
+            role.users = combinedUsers.slice(0, role.slots); // Ensure we don't exceed slots
+            role.waitlist = [...waitlist, ...combinedUsers.slice(role.slots)]; // Overflow goes to waitlist
+        } catch (err) {
+            logger.error('Error syncing raid reactions:', { error: err, emoji: role.emoji });
+        }
+    }
+}
+
+/**
+ * Syncs reactions from a museum signup message with stored data.
+ */
+async function syncMuseumReactions(message, raidData) {
+    const reaction = message.reactions.cache.find((r) => r.emoji.name === '✅');
+    if (!reaction) return;
+
+    try {
+        if (reaction.partial) await reaction.fetch();
+        const userCollection = await reaction.users.fetch();
+        const reactionUserIds = [];
+
+        userCollection.forEach((reactUser) => {
+            if (!reactUser.bot && !reactionUserIds.includes(reactUser.id)) {
+                reactionUserIds.push(reactUser.id);
+            }
+        });
+
+        const maxSlots = raidData.maxSlots || 12;
+        const combinedUsers = mergeUniqueUsers(reactionUserIds, raidData.signups || []);
+
+        raidData.signups = combinedUsers.slice(0, maxSlots);
+        raidData.waitlist = (raidData.waitlist || []).filter((userId) => !raidData.signups.includes(userId));
+        raidData.waitlist = [...raidData.waitlist, ...combinedUsers.slice(maxSlots)];
+    } catch (err) {
+        logger.error('Error syncing museum reactions:', { error: err });
+    }
+}
+
+/**
+ * Syncs reactions from a key boss signup message with stored data.
+ */
+async function syncKeyReactions(message, raidData) {
+    const reaction = message.reactions.cache.find((r) => r.emoji.name === '🔑');
+    if (!reaction) return;
+
+    try {
+        if (reaction.partial) await reaction.fetch();
+        const userCollection = await reaction.users.fetch();
+        const reactionUserIds = [];
+
+        userCollection.forEach((reactUser) => {
+            if (!reactUser.bot && !reactionUserIds.includes(reactUser.id)) {
+                reactionUserIds.push(reactUser.id);
+            }
+        });
+
+        const maxSlots = raidData.maxSlots || 12;
+        const combinedUsers = mergeUniqueUsers(reactionUserIds, raidData.signups || []);
+
+        raidData.signups = combinedUsers.slice(0, maxSlots);
+        raidData.waitlist = (raidData.waitlist || []).filter((userId) => !raidData.signups.includes(userId));
+        raidData.waitlist = [...raidData.waitlist, ...combinedUsers.slice(maxSlots)];
+    } catch (err) {
+        logger.error('Error syncing key reactions:', { error: err });
+    }
 }
 
 module.exports = { reinitializeRaids };

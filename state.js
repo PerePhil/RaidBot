@@ -533,15 +533,15 @@ function reconstructRaidData(raid, signups) {
             }
         }
 
-        // Build a lookup map for populating signups
-        const roleByName = new Map();
+        // Build a lookup map for populating signups (use emoji as key since names can be duplicated)
+        const roleByEmoji = new Map();
         for (const role of allRoles) {
-            roleByName.set(role.name, role);
+            roleByEmoji.set(role.emoji, role);
         }
 
         // Populate signups from database
         for (const signup of signups) {
-            let role = roleByName.get(signup.role_name);
+            let role = roleByEmoji.get(signup.role_emoji);
 
             // If role not in template (legacy data), create it
             if (!role) {
@@ -556,7 +556,7 @@ function reconstructRaidData(raid, signups) {
                     waitlist: []
                 };
                 allRoles.push(role);
-                roleByName.set(signup.role_name, role);
+                roleByEmoji.set(signup.role_emoji, role);
             }
 
             if (signup.is_waitlist) {

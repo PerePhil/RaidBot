@@ -306,9 +306,16 @@ async function syncRaidReactions(message, raidData) {
         return;
     }
 
+    // First pass: collect all reaction data and build a map of user -> roles they reacted to
+    const userReactions = new Map(); // userId -> [emoji1, emoji2, ...]
+    const roleReactions = new Map(); // emoji -> [userId1, userId2, ...]
+
     for (const role of raidData.signups) {
         const reaction = message.reactions.cache.find((r) => r.emoji.name === role.emoji);
-        if (!reaction) continue;
+        if (!reaction) {
+            roleReactions.set(role.emoji, []);
+            continue;
+        }
 
         try {
             if (reaction.partial) await reaction.fetch();
@@ -316,22 +323,73 @@ async function syncRaidReactions(message, raidData) {
             const reactionUserIds = [];
 
             userCollection.forEach((reactUser) => {
-                if (!reactUser.bot && !reactionUserIds.includes(reactUser.id)) {
-                    reactionUserIds.push(reactUser.id);
+                if (!reactUser.bot) {
+                    if (!reactionUserIds.includes(reactUser.id)) {
+                        reactionUserIds.push(reactUser.id);
+                    }
+                    // Track which roles each user has reacted to
+                    const userRoles = userReactions.get(reactUser.id) || [];
+                    if (!userRoles.includes(role.emoji)) {
+                        userRoles.push(role.emoji);
+                        userReactions.set(reactUser.id, userRoles);
+                    }
                 }
             });
 
-            // Merge reaction users with stored users (reactions take precedence for active signups)
-            const combinedUsers = mergeUniqueUsers(reactionUserIds, role.users || []);
-
-            // Filter waitlist to exclude users now in active signups
-            const waitlist = (role.waitlist || []).filter((userId) => !combinedUsers.includes(userId));
-
-            role.users = combinedUsers.slice(0, role.slots); // Ensure we don't exceed slots
-            role.waitlist = [...waitlist, ...combinedUsers.slice(role.slots)]; // Overflow goes to waitlist
+            roleReactions.set(role.emoji, reactionUserIds);
         } catch (err) {
-            logger.error('Error syncing raid reactions:', { error: err, emoji: role.emoji });
+            logger.error('Error fetching raid reactions:', { error: err, emoji: role.emoji });
+            roleReactions.set(role.emoji, []);
         }
+    }
+
+    // Track users already assigned to a role (to prevent duplicates across roles)
+    const assignedUsers = new Set();
+
+    // Second pass: assign users to roles, ensuring each user only appears in one role
+    for (const role of raidData.signups) {
+        const reactionUserIds = roleReactions.get(role.emoji) || [];
+        const storedUsers = role.users || [];
+        const storedWaitlist = role.waitlist || [];
+
+        // Determine which users should be in this role:
+        // 1. Users who reacted to this role (and haven't been assigned elsewhere)
+        // 2. Users from DB who still have a reaction to this role (not moved to another role)
+        const eligibleUsers = [];
+
+        // First, add users who currently have a reaction to this role
+        for (const userId of reactionUserIds) {
+            if (!assignedUsers.has(userId)) {
+                eligibleUsers.push(userId);
+            }
+        }
+
+        // Then, add users from DB who DON'T have any reaction (removed all reactions while offline)
+        // but keep them only if they were in DB and have NO reactions to any role
+        for (const userId of storedUsers) {
+            if (!assignedUsers.has(userId) && !eligibleUsers.includes(userId)) {
+                // User was in DB but not in reactions for this role
+                // Only keep them if they have no reactions at all (didn't switch roles)
+                if (!userReactions.has(userId)) {
+                    eligibleUsers.push(userId);
+                }
+                // If they DO have reactions to other roles, they switched - don't keep them here
+            }
+        }
+
+        // Mark all eligible users as assigned
+        eligibleUsers.forEach(userId => assignedUsers.add(userId));
+
+        // Filter waitlist: remove anyone now in active signups or assigned elsewhere
+        const waitlist = storedWaitlist.filter(userId =>
+            !eligibleUsers.includes(userId) && !assignedUsers.has(userId)
+        );
+
+        role.users = eligibleUsers.slice(0, role.slots);
+        role.waitlist = [...waitlist, ...eligibleUsers.slice(role.slots)];
+
+        // Mark waitlist users as assigned too
+        role.waitlist.forEach(userId => assignedUsers.add(userId));
     }
 }
 

@@ -53,7 +53,7 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
     await interaction.editReply({
         content: buildMessageLink(raidData, messageId) || null,
         embeds: [embed],
-        components: [buttons]
+        components: buttons
     });
 
     const replyMessage = await interaction.fetchReply();
@@ -105,10 +105,12 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
     });
 
     collector.on('end', async () => {
-        const disabledRow = new ActionRowBuilder().addComponents(
-            ...buttons.components.map((btn) => ButtonBuilder.from(btn.data).setDisabled(true))
+        const disabledRows = buttons.map(row =>
+            new ActionRowBuilder().addComponents(
+                ...row.components.map((btn) => ButtonBuilder.from(btn.data).setDisabled(true))
+            )
         );
-        await replyMessage.edit({ components: [disabledRow] }).catch(() => { });
+        await replyMessage.edit({ components: disabledRows }).catch(() => { });
     });
 }
 

@@ -540,6 +540,10 @@ function reconstructRaidData(raid, signups) {
         }
 
         // Populate signups from database
+        // Track users already assigned to prevent duplicates across roles
+        const assignedToMain = new Set();
+        const assignedToWaitlist = new Set();
+
         for (const signup of signups) {
             let role = roleByEmoji.get(signup.role_emoji);
 
@@ -560,13 +564,26 @@ function reconstructRaidData(raid, signups) {
             }
 
             if (signup.is_waitlist) {
-                role.waitlist.push(signup.user_id);
+                // Only add to waitlist if not already in any main signup or this role's waitlist
+                if (!assignedToMain.has(signup.user_id) && !role.waitlist.includes(signup.user_id)) {
+                    role.waitlist.push(signup.user_id);
+                    assignedToWaitlist.add(signup.user_id);
+                }
             } else {
-                role.users.push(signup.user_id);
-                if (signup.side_assignment) {
-                    role.sideAssignments[signup.user_id] = signup.side_assignment;
+                // Only add to main signup if not already assigned to another role
+                if (!assignedToMain.has(signup.user_id) && !role.users.includes(signup.user_id)) {
+                    role.users.push(signup.user_id);
+                    assignedToMain.add(signup.user_id);
+                    if (signup.side_assignment) {
+                        role.sideAssignments[signup.user_id] = signup.side_assignment;
+                    }
                 }
             }
+        }
+
+        // Clean up: remove users from waitlist if they're in any main signup
+        for (const role of allRoles) {
+            role.waitlist = role.waitlist.filter(userId => !assignedToMain.has(userId));
         }
 
         raidData.signups = allRoles;

@@ -17,9 +17,16 @@ const {
     getMuseumSignupChannel,
     fetchRaidMessage
 } = require('../utils/raidHelpers');
+const { sendDebugLog } = require('../auditLog');
 
 async function reinitializeRaids(client) {
     logger.info('Restoring stored raids...');
+
+    // Send debug log to all guilds that have a debug channel configured
+    for (const guild of client.guilds.cache.values()) {
+        sendDebugLog(guild, 'REINIT', 'Bot reinitializing, scanning stored raids...');
+    }
+
     loadActiveRaidState();
 
     let stateChanged = await refreshStoredRaids(client);
@@ -31,6 +38,12 @@ async function reinitializeRaids(client) {
     }
 
     logger.info(`Reinitialized ${activeRaids.size} active raids`);
+
+    // Log reinit complete
+    for (const guild of client.guilds.cache.values()) {
+        sendDebugLog(guild, 'SYSTEM', `Reinit complete: ${activeRaids.size} active raids`);
+    }
+
     await updateBotPresence();
 }
 
@@ -235,6 +248,7 @@ async function rebuildRaidSignup(message, guildId, raidId, creatorId, template, 
     }
 
     const allRoles = [];
+    const assignedUsers = new Set();
 
     for (const group of roleGroups) {
         for (const role of group.roles) {
@@ -257,15 +271,32 @@ async function rebuildRaidSignup(message, guildId, raidId, creatorId, template, 
 
             const embedDetails = roleDetails.get(role.emoji) || { users: [], waitlist: [] };
             const combinedUsers = mergeUniqueUsers(users, embedDetails.users);
-            const waitlist = (embedDetails.waitlist || []).filter((userId) => !combinedUsers.includes(userId));
-            const roleSideAssignments = filterAssignmentsForRole(role.emoji, combinedUsers, embedSideAssignments);
+
+            // Filter out users already assigned to an earlier role (prevents multi-role from offline reactions)
+            const dedupedUsers = combinedUsers.filter((userId) => {
+                if (assignedUsers.has(userId)) {
+                    logger.warn('Rebuild: skipping duplicate user already assigned to another role', {
+                        raidId, userId, skippedRole: role.name, emoji: role.emoji
+                    });
+                    return false;
+                }
+                return true;
+            });
+            dedupedUsers.forEach((userId) => assignedUsers.add(userId));
+
+            const waitlist = (embedDetails.waitlist || []).filter((userId) =>
+                !dedupedUsers.includes(userId) && !assignedUsers.has(userId)
+            );
+            waitlist.forEach((userId) => assignedUsers.add(userId));
+
+            const roleSideAssignments = filterAssignmentsForRole(role.emoji, dedupedUsers, embedSideAssignments);
 
             allRoles.push({
                 emoji: role.emoji,
                 icon: role.icon,
                 name: role.name,
                 slots: role.slots,
-                users: combinedUsers,
+                users: dedupedUsers,
                 groupName: group.name,
                 sideAssignments: roleSideAssignments,
                 waitlist
@@ -343,8 +374,22 @@ async function syncRaidReactions(message, raidData) {
         }
     }
 
+    // Build stored role lookup: userId -> emoji they were stored under (DB = source of truth)
+    const storedRoleMap = new Map();
+    for (const role of raidData.signups) {
+        for (const userId of (role.users || [])) {
+            storedRoleMap.set(userId, role.emoji);
+        }
+        for (const userId of (role.waitlist || [])) {
+            if (!storedRoleMap.has(userId)) {
+                storedRoleMap.set(userId, role.emoji);
+            }
+        }
+    }
+
     // Track users already assigned to a role (to prevent duplicates across roles)
     const assignedUsers = new Set();
+    const syncChanges = [];
 
     // Second pass: assign users to roles, ensuring each user only appears in one role
     for (const role of raidData.signups) {
@@ -360,6 +405,31 @@ async function syncRaidReactions(message, raidData) {
         // First, add users who currently have a reaction to this role
         for (const userId of reactionUserIds) {
             if (!assignedUsers.has(userId)) {
+                const userRoleEmojis = userReactions.get(userId) || [];
+
+                // If user reacted to multiple roles, prefer their stored DB role
+                if (userRoleEmojis.length > 1) {
+                    const storedEmoji = storedRoleMap.get(userId);
+                    const storedRoleExists = storedEmoji && raidData.signups.some((r) => r.emoji === storedEmoji);
+                    if (storedRoleExists && storedEmoji !== role.emoji && userRoleEmojis.includes(storedEmoji)) {
+                        // User was stored in a different role and still has that reaction — defer to it
+                        syncChanges.push({
+                            userId, action: 'deferred',
+                            from: role.emoji, to: storedEmoji,
+                            reason: 'multi-reaction, preferring stored DB role'
+                        });
+                        continue;
+                    }
+                    if (!storedRoleExists) {
+                        syncChanges.push({
+                            userId, action: 'ambiguous',
+                            assignedTo: role.emoji,
+                            reactions: userRoleEmojis,
+                            reason: 'multi-reaction with no stored role, assigned to first match'
+                        });
+                    }
+                }
+
                 eligibleUsers.push(userId);
             }
         }
@@ -377,6 +447,26 @@ async function syncRaidReactions(message, raidData) {
             }
         }
 
+        // Track changes: new users added, stored users removed
+        for (const userId of eligibleUsers) {
+            if (!storedUsers.includes(userId)) {
+                syncChanges.push({
+                    userId, action: 'added',
+                    role: role.emoji, roleName: role.name,
+                    reason: 'new reaction while bot was offline'
+                });
+            }
+        }
+        for (const userId of storedUsers) {
+            if (!eligibleUsers.includes(userId) && !assignedUsers.has(userId)) {
+                syncChanges.push({
+                    userId, action: 'removed',
+                    role: role.emoji, roleName: role.name,
+                    reason: userReactions.has(userId) ? 'switched to different role' : 'removed all reactions'
+                });
+            }
+        }
+
         // Mark all eligible users as assigned
         eligibleUsers.forEach(userId => assignedUsers.add(userId));
 
@@ -390,6 +480,16 @@ async function syncRaidReactions(message, raidData) {
 
         // Mark waitlist users as assigned too
         role.waitlist.forEach(userId => assignedUsers.add(userId));
+    }
+
+    // Log all sync changes for audit trail
+    if (syncChanges.length > 0) {
+        logger.warn('Raid sync detected signup changes after bot downtime', {
+            raidId: raidData.raidId,
+            guildId: raidData.guildId,
+            changeCount: syncChanges.length,
+            changes: syncChanges
+        });
     }
 }
 

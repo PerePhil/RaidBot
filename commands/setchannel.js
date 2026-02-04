@@ -7,7 +7,7 @@ const {
     saveMuseumChannels,
     saveKeyChannels
 } = require('../state');
-const { setAuditChannel, getAuditChannel } = require('../auditLog');
+const { setAuditChannel, getAuditChannel, setDebugChannel, getDebugChannel } = require('../auditLog');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -32,6 +32,11 @@ module.exports = {
             option.setName('audit_channel')
                 .setDescription('Optional: set audit log channel directly')
                 .addChannelTypes(ChannelType.GuildText)
+                .setRequired(false))
+        .addChannelOption((option) =>
+            option.setName('debug_channel')
+                .setDescription('Optional: set debug log channel directly')
+                .addChannelTypes(ChannelType.GuildText)
                 .setRequired(false)),
     requiresManageGuild: true,
     async execute(interaction) {
@@ -39,6 +44,7 @@ module.exports = {
         const directMuseum = interaction.options.getChannel('museum_channel');
         const directKey = interaction.options.getChannel('key_channel');
         const directAudit = interaction.options.getChannel('audit_channel');
+        const directDebug = interaction.options.getChannel('debug_channel');
 
         if (directRaid) {
             raidChannels.set(interaction.guildId, directRaid.id);
@@ -55,10 +61,13 @@ module.exports = {
         if (directAudit) {
             setAuditChannel(interaction.guildId, directAudit.id);
         }
+        if (directDebug) {
+            setDebugChannel(interaction.guildId, directDebug.id);
+        }
 
-        if (directRaid || directMuseum || directKey) {
+        if (directRaid || directMuseum || directKey || directAudit || directDebug) {
             return interaction.reply({
-                content: `Channels updated.\nRaid: ${formatChannel(raidChannels.get(interaction.guildId), interaction.guild)}\nMuseum: ${formatChannel(museumChannels.get(interaction.guildId), interaction.guild)}\nKey: ${formatChannel(keyChannels.get(interaction.guildId), interaction.guild)}\nAudit: ${formatChannel(getAuditChannel(interaction.guildId), interaction.guild)}`,
+                content: `Channels updated.\nRaid: ${formatChannel(raidChannels.get(interaction.guildId), interaction.guild)}\nMuseum: ${formatChannel(museumChannels.get(interaction.guildId), interaction.guild)}\nKey: ${formatChannel(keyChannels.get(interaction.guildId), interaction.guild)}\nAudit: ${formatChannel(getAuditChannel(interaction.guildId), interaction.guild)}\nDebug: ${formatChannel(getDebugChannel(interaction.guildId), interaction.guild)}`,
                 flags: MessageFlags.Ephemeral
             });
         }
@@ -110,6 +119,13 @@ module.exports = {
                 const refreshed = buildEmbed(interaction.guildId, interaction.guild);
                 return i.update({ embeds: [refreshed] });
             }
+            if (i.customId === 'setchannel:set:debug') {
+                const channel = i.channels.first();
+                if (!channel) return i.reply({ content: 'Select a channel.', flags: MessageFlags.Ephemeral });
+                setDebugChannel(interaction.guildId, channel.id);
+                const refreshed = buildEmbed(interaction.guildId, interaction.guild);
+                return i.update({ embeds: [refreshed] });
+            }
             return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
         });
 
@@ -128,7 +144,7 @@ module.exports = {
                 );
                 return newRow;
             });
-            await message.edit({ components: disabledComponents }).catch(() => {});
+            await message.edit({ components: disabledComponents }).catch(() => { });
         });
     }
 };
@@ -138,14 +154,16 @@ function buildEmbed(guildId, guild) {
     const museumId = museumChannels.get(guildId);
     const keyId = keyChannels.get(guildId);
     const auditId = getAuditChannel(guildId);
+    const debugId = getDebugChannel(guildId);
     return new EmbedBuilder()
         .setTitle('Channel Setup')
-        .setDescription('Select channels for raid, museum, and key boss signups.')
+        .setDescription('Select channels for raid, museum, key boss signups, and logging.')
         .addFields(
             { name: 'Raid channel', value: formatChannel(raidId, guild), inline: false },
             { name: 'Museum channel', value: formatChannel(museumId, guild), inline: false },
             { name: 'Key boss channel', value: formatChannel(keyId, guild), inline: false },
-            { name: 'Audit log channel', value: formatChannel(auditId, guild), inline: false }
+            { name: 'Audit log channel', value: formatChannel(auditId, guild), inline: false },
+            { name: 'Debug log channel', value: formatChannel(debugId, guild), inline: false }
         );
 }
 
@@ -174,7 +192,13 @@ function buildComponents() {
             .setPlaceholder('Select audit log channel')
             .addChannelTypes(ChannelType.GuildText)
     );
-    return [raidRow, museumRow, keyRow, auditRow];
+    const debugRow = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+            .setCustomId('setchannel:set:debug')
+            .setPlaceholder('Select debug log channel')
+            .addChannelTypes(ChannelType.GuildText)
+    );
+    return [raidRow, museumRow, keyRow, auditRow, debugRow];
 }
 
 function formatChannel(channelId, guild) {

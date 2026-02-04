@@ -20,7 +20,7 @@ const { handleReactionAdd, handleReactionRemove } = require('./raids/reactionHan
 const { setPresenceClient, updateBotPresence } = require('./presence');
 const { startReminderScheduler } = require('./reminderScheduler');
 const { loadTemplateOverrides } = require('./templatesManager');
-const { loadAuditChannels } = require('./auditLog');
+const { loadAuditChannels, loadDebugChannels, sendDebugLog } = require('./auditLog');
 const { loadAvailability } = require('./availabilityManager');
 const { loadPolls, getPollByMessage, recordVote, removeVote, getIndexFromEmoji } = require('./pollManager');
 const { loadAnalytics } = require('./utils/analytics');
@@ -58,6 +58,7 @@ client.once('clientReady', async () => {
     loadRaidStats();
     loadTemplateOverrides();
     loadAuditChannels();
+    loadDebugChannels();
     loadAvailability();
     loadAdminRoles();
     loadCommandRoles();

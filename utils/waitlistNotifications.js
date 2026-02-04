@@ -1,8 +1,9 @@
 const { formatRaidType, formatTimeLabel, buildMessageLink } = require('./raidFormatters');
-const { markActiveRaidUpdated } = require('../state');
+const { markActiveRaidUpdated, activeRaids } = require('../state');
 const { logger } = require('./logger');
 const { incrementCounter } = require('./metrics');
 const { sendDMWithBreaker } = require('./circuitBreaker');
+const { sendDebugLog } = require('../auditLog');
 
 /**
  * Process waitlist promotions when slots open up
@@ -38,6 +39,11 @@ async function processWaitlistOpenings(client, raidData, messageId) {
             await dmAutoAssignment(client, raidData, messageId, userId, role, index);
             incrementCounter('waitlist_promotions_total');
             promoted = true;
+            // Debug log the promotion
+            try {
+                const guild = await client.guilds.fetch(raidData.guildId);
+                sendDebugLog(guild, 'PROMOTED', `<@${userId}> promoted from waitlist to ${role.name} (raid \`${raidData.raidId}\`)`);
+            } catch { /* ignore guild fetch errors */ }
         }
     }
 
@@ -87,6 +93,11 @@ async function promoteMuseumWaitlist(client, raidData, messageId) {
             await dmMuseumAssignment(client, raidData, messageId, userId);
             incrementCounter('waitlist_promotions_total');
             promoted = true;
+            // Debug log the promotion
+            try {
+                const guild = await client.guilds.fetch(raidData.guildId);
+                sendDebugLog(guild, 'PROMOTED', `<@${userId}> promoted from museum waitlist (\`${raidData.raidId}\`)`);
+            } catch { /* ignore guild fetch errors */ }
         }
     }
 
@@ -119,6 +130,11 @@ async function notifyUser(client, raidData, messageId, userId, lines) {
     } catch (error) {
         logger.error('Could not DM user about waitlist promotion:', { error: error });
         incrementCounter('dm_failures_total');
+        // Debug log the DM failure
+        try {
+            const guild = await client.guilds.fetch(raidData.guildId);
+            sendDebugLog(guild, 'DM_FAILED', `Could not notify <@${userId}> of waitlist promotion (raid \`${raidData.raidId}\`)`);
+        } catch { /* ignore guild fetch errors */ }
     }
 
     // Fallback: post in the signup channel so they still see the notice.

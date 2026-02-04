@@ -76,6 +76,8 @@ function runMigrations() {
         // No-show tracking (added Jan 2025)
         { table: 'guild_user_stats', column: 'no_shows', sql: 'ALTER TABLE guild_user_stats ADD COLUMN no_shows INTEGER DEFAULT 0' },
         { table: 'user_stats', column: 'no_shows', sql: 'ALTER TABLE user_stats ADD COLUMN no_shows INTEGER DEFAULT 0' },
+        // Debug logging channel (added Feb 2025)
+        { table: 'guilds', column: 'debug_channel_id', sql: 'ALTER TABLE guilds ADD COLUMN debug_channel_id TEXT' },
     ];
 
     // Create raid_attendance table if it doesn't exist

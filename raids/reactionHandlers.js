@@ -5,6 +5,7 @@ const { reactionLimiter } = require('../utils/rateLimiter');
 const { Mutex } = require('async-mutex');
 const { logger } = require('../utils/logger');
 const { incrementCounter } = require('../utils/metrics');
+const { sendDebugLog } = require('../auditLog');
 
 // Per-raid mutex locks to prevent race conditions
 const locks = new Map(); // messageId -> Mutex
@@ -57,6 +58,7 @@ async function handleReactionAdd(reaction, user) {
         if (raidData.closed) {
             await reaction.users.remove(user.id);
             await safeDm(user, 'Signups for this raid are closed. Please contact a staff member if you need assistance.');
+            sendDebugLog(reaction.message.guild, 'BLOCKED', `<@${user.id}> tried to sign up but raid \`${raidData.raidId}\` is closed`);
             return;
         }
 
@@ -85,6 +87,7 @@ async function handleReactionAdd(reaction, user) {
         if (!allowedCheck.allowed) {
             await reaction.users.remove(user.id);
             await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'raid'));
+            sendDebugLog(reaction.message.guild, 'RESTRICTED', `<@${user.id}> lacks required role for raid signup`);
             return;
         }
 
@@ -118,6 +121,7 @@ async function handleReactionAdd(reaction, user) {
                 if (raidData.guildId) {
                     recordUserActivity(raidData.guildId, user.id);
                 }
+                sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to waitlist for ${role.name} (raid \`${raidData.raidId}\`)`);
             }
             await updateRaidEmbed(reaction.message, raidData);
             markActiveRaidUpdated(reaction.message.id);
@@ -126,6 +130,7 @@ async function handleReactionAdd(reaction, user) {
         }
 
         role.users.push(user.id);
+        sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for ${role.name} (raid \`${raidData.raidId}\`)`);
         await updateRaidEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
 
@@ -186,6 +191,7 @@ async function handleReactionRemove(reaction, user) {
 
         if (userIndex > -1) {
             role.users.splice(userIndex, 1);
+            sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from ${role.name} (raid \`${raidData.raidId}\`)`);
             await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
             await updateRaidEmbed(reaction.message, raidData);
             markActiveRaidUpdated(reaction.message.id);
@@ -222,6 +228,7 @@ async function handleMuseumReactionAdd(reaction, user, raidData) {
             if (raidData.guildId) {
                 recordUserActivity(raidData.guildId, user.id);
             }
+            sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to museum waitlist (\`${raidData.raidId}\`)`);
         }
         await updateMuseumEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
@@ -230,6 +237,7 @@ async function handleMuseumReactionAdd(reaction, user, raidData) {
     }
 
     raidData.signups.push(user.id);
+    sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for museum (\`${raidData.raidId}\`)`);
     await updateMuseumEmbed(reaction.message, raidData);
     markActiveRaidUpdated(reaction.message.id);
 
@@ -250,6 +258,7 @@ async function handleMuseumReactionRemove(reaction, user, raidData) {
     const signupIndex = raidData.signups.indexOf(user.id);
     if (signupIndex > -1) {
         raidData.signups.splice(signupIndex, 1);
+        sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from museum (\`${raidData.raidId}\`)`);
 
         await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
         await updateMuseumEmbed(reaction.message, raidData);
@@ -284,6 +293,7 @@ async function handleKeyReactionAdd(reaction, user, raidData) {
             if (raidData.guildId) {
                 recordUserActivity(raidData.guildId, user.id);
             }
+            sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to key boss waitlist (\`${raidData.raidId}\`)`);
         }
         await updateKeyEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
@@ -292,6 +302,7 @@ async function handleKeyReactionAdd(reaction, user, raidData) {
     }
 
     raidData.signups.push(user.id);
+    sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for key boss (\`${raidData.raidId}\`)`);
     await updateKeyEmbed(reaction.message, raidData);
     markActiveRaidUpdated(reaction.message.id);
 
@@ -312,6 +323,7 @@ async function handleKeyReactionRemove(reaction, user, raidData) {
     const signupIndex = raidData.signups.indexOf(user.id);
     if (signupIndex > -1) {
         raidData.signups.splice(signupIndex, 1);
+        sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from key boss (\`${raidData.raidId}\`)`);
 
         await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
         await updateKeyEmbed(reaction.message, raidData);

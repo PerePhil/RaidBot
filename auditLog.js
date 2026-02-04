@@ -1,16 +1,49 @@
 const { db, prepare } = require('./db/database');
 
-// In-memory cache
+// In-memory caches
 const auditChannels = new Map();
+const debugChannels = new Map();
 
-// Batching state
+// Batching state (for audit logs only)
 const pendingEmbeds = new Map(); // guildId -> [payloads]
 const flushTimers = new Map(); // guildId -> timeout
 const guildRefs = new Map(); // guildId -> guild ref
 const BATCH_WINDOW_MS = 2 * 60 * 1000;
 const EMBEDS_PER_MESSAGE = 10;
 
-// Prepared statements
+// Debug log categories
+const DEBUG_CATEGORY = {
+    SIGNUP: '📝',
+    WAITLIST: '⏳',
+    UNSIGN: '❌',
+    PROMOTED: '⬆️',
+    BLOCKED: '🔒',
+    RESTRICTED: '🚫',
+    REINIT: '🔄',
+    RESTORED: '✅',
+    STALE: '🗑️',
+    DISCOVERED: '🔍',
+    SYNC: '📊',
+    CREATED: '🆕',
+    CLOSED: '🔒',
+    REOPENED: '🔓',
+    DELETED: '🗑️',
+    TIME_CHANGE: '⏰',
+    LENGTH_CHANGE: '📏',
+    NO_SHOWS: '⚠️',
+    ASSIGNED: '🎯',
+    THREAD: '💬',
+    NOTIFIED: '📬',
+    DM_FAILED: '⚠️',
+    STARTUP: '🟢',
+    SHUTDOWN: '🔴',
+    GUILD: '🏠',
+    RECURRING: '🔁',
+    SCHEDULED: '📅',
+    SYSTEM: '⚙️'
+};
+
+// Prepared statements (lazily initialized)
 let statements = null;
 
 function getStatements() {
@@ -19,11 +52,15 @@ function getStatements() {
     statements = {
         getAuditChannel: prepare('SELECT audit_channel_id FROM guilds WHERE id = ?'),
         updateAuditChannel: prepare('UPDATE guilds SET audit_channel_id = ? WHERE id = ?'),
+        getDebugChannel: prepare('SELECT debug_channel_id FROM guilds WHERE id = ?'),
+        updateDebugChannel: prepare('UPDATE guilds SET debug_channel_id = ? WHERE id = ?'),
         ensureGuild: prepare('INSERT OR IGNORE INTO guilds (id) VALUES (?)')
     };
 
     return statements;
 }
+
+// ===== AUDIT CHANNELS =====
 
 function loadAuditChannels() {
     auditChannels.clear();
@@ -66,6 +103,48 @@ function getAuditChannel(guildId) {
 
     return channelId;
 }
+
+// ===== DEBUG CHANNELS =====
+
+function loadDebugChannels() {
+    debugChannels.clear();
+    const rows = prepare('SELECT id, debug_channel_id FROM guilds WHERE debug_channel_id IS NOT NULL').all();
+    rows.forEach(row => debugChannels.set(row.id, row.debug_channel_id));
+    console.log(`Loaded ${debugChannels.size} debug channel configurations`);
+}
+
+function setDebugChannel(guildId, channelId) {
+    const stmts = getStatements();
+    stmts.ensureGuild.run(guildId);
+    stmts.updateDebugChannel.run(channelId || null, guildId);
+
+    if (!channelId) {
+        debugChannels.delete(guildId);
+    } else {
+        debugChannels.set(guildId, channelId);
+    }
+}
+
+function getDebugChannel(guildId) {
+    // Check cache first
+    if (debugChannels.has(guildId)) {
+        return debugChannels.get(guildId);
+    }
+
+    // Fallback to database
+    const stmts = getStatements();
+    const row = stmts.getDebugChannel.get(guildId);
+    const channelId = row?.debug_channel_id || null;
+
+    // Cache the result
+    if (channelId) {
+        debugChannels.set(guildId, channelId);
+    }
+
+    return channelId;
+}
+
+// ===== AUDIT LOG (batched embeds) =====
 
 function enqueueAudit(guild, payload) {
     guildRefs.set(guild.id, guild);
@@ -138,11 +217,51 @@ function buildEmbed(description, options = {}) {
     return embed;
 }
 
+// ===== DEBUG LOG (real-time text) =====
+
+/**
+ * Send a debug log message to the guild's debug channel
+ * @param {Guild} guild - Discord guild object
+ * @param {string} category - Category key from DEBUG_CATEGORY (e.g., 'SIGNUP', 'REINIT')
+ * @param {string} message - Debug message to log
+ */
+async function sendDebugLog(guild, category, message) {
+    if (!guild?.id) return;
+
+    const channelId = getDebugChannel(guild.id);
+    if (!channelId) return;
+
+    let channel = null;
+    try {
+        channel = await guild.channels.fetch(channelId).catch(() => guild.channels.cache.get(channelId));
+    } catch {
+        channel = null;
+    }
+    if (!channel) return;
+
+    const emoji = DEBUG_CATEGORY[category] || DEBUG_CATEGORY.SYSTEM;
+    const timestamp = Math.floor(Date.now() / 1000);
+    const content = `${emoji} **${category}** <t:${timestamp}:T> ${message}`;
+
+    try {
+        await channel.send({ content, allowedMentions: { parse: [] } });
+    } catch (error) {
+        console.error('Failed to send debug log:', error);
+    }
+}
+
 module.exports = {
     loadAuditChannels,
     saveAuditChannels,
     setAuditChannel,
     getAuditChannel,
     sendAuditLog,
-    auditChannels
+    auditChannels,
+    // Debug logging exports
+    loadDebugChannels,
+    setDebugChannel,
+    getDebugChannel,
+    sendDebugLog,
+    debugChannels,
+    DEBUG_CATEGORY
 };

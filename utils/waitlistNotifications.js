@@ -17,7 +17,7 @@ const { sendDebugLog } = require('../auditLog');
 async function processWaitlistOpenings(client, raidData, messageId) {
     if (raidData.closed) return false;
 
-    if (raidData.type === 'museum') {
+    if (raidData.type === 'museum' || raidData.type === 'key') {
         return promoteMuseumWaitlist(client, raidData, messageId);
     }
 

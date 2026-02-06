@@ -16,13 +16,21 @@ const {
     fetchRaidMessage,
     closeRaidSignup,
     reopenRaidSignup,
-    parseDateTimeToTimestamp
+    parseDateTimeToTimestamp,
+    getRaidSignupChannel,
+    getMuseumSignupChannel,
+    getKeySignupChannel,
+    updateRaidEmbed,
+    updateMuseumEmbed,
+    updateKeyEmbed
 } = require('../utils/raidHelpers');
 const { buildMessageLink } = require('../utils/raidFormatters');
 const { updateBotPresence } = require('../presence');
-const { activeRaids, deleteActiveRaid, markActiveRaidUpdated, recordNoShow, clearNoShow, guildParticipation } = require('../state');
+const { activeRaids, deleteActiveRaid, markActiveRaidUpdated, setActiveRaid, getGuildSettings, recordNoShow, clearNoShow, guildParticipation } = require('../state');
 const { sendAuditLog } = require('../auditLog');
 const { usersAvailableAt } = require('../availabilityManager');
+const { generateId } = require('../utils/idGenerator');
+const { templatesForGuild } = require('../templatesManager');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -95,6 +103,9 @@ async function sendPanel(interaction, raidId, raidData, messageId) {
             }
             if (action === 'findsub') {
                 return showFindSubSelect(i, raidEntry, msgId);
+            }
+            if (action === 'duplicate') {
+                return showDuplicateFlow(i, raidEntry, msgId);
             }
             return i.reply({ content: 'Unsupported action.', flags: MessageFlags.Ephemeral });
         } catch (error) {
@@ -518,7 +529,12 @@ function buildPanelComponents(messageId, raidData) {
             .setLabel('Find Sub')
             .setEmoji('🔍')
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(isMuseumOrKey) // Disabled for museum/key (no roles)
+            .setDisabled(isMuseumOrKey), // Disabled for museum/key (no roles)
+        new ButtonBuilder()
+            .setCustomId(`raid:duplicate:${messageId}`)
+            .setLabel('Duplicate')
+            .setEmoji('📋')
+            .setStyle(ButtonStyle.Secondary)
     );
 
     return [row1, row2];
@@ -550,7 +566,8 @@ async function disablePanel(interaction) {
             );
             const row2 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('raid:noshow:disabled').setLabel('Mark No-Show').setEmoji('❌').setStyle(ButtonStyle.Secondary).setDisabled(true),
-                new ButtonBuilder().setCustomId('raid:findsub:disabled').setLabel('Find Sub').setEmoji('🔍').setStyle(ButtonStyle.Primary).setDisabled(true)
+                new ButtonBuilder().setCustomId('raid:findsub:disabled').setLabel('Find Sub').setEmoji('🔍').setStyle(ButtonStyle.Primary).setDisabled(true),
+                new ButtonBuilder().setCustomId('raid:duplicate:disabled').setLabel('Duplicate').setEmoji('📋').setStyle(ButtonStyle.Secondary).setDisabled(true)
             );
             await interaction.message.edit({ components: [row1, row2] }).catch(() => { });
         } else {
@@ -771,6 +788,308 @@ async function showFindSubSelect(interaction, raidData, messageId) {
         content: null,
         embeds: [embed],
         components: []
+    });
+}
+
+async function showDuplicateFlow(interaction, raidData, messageId) {
+    const modal = new ModalBuilder()
+        .setCustomId(`raid:dupModal:${messageId}`)
+        .setTitle('Duplicate Raid')
+        .addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId('new_datetime')
+                    .setLabel('New date/time for the duplicate')
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder('e.g., "next friday 7pm" or Unix timestamp')
+                    .setRequired(true)
+            )
+        );
+
+    await interaction.showModal(modal);
+
+    const submission = await interaction.awaitModalSubmit({
+        time: 60 * 1000,
+        filter: (i) => i.customId === `raid:dupModal:${messageId}` && i.user.id === interaction.user.id
+    }).catch(() => null);
+
+    if (!submission) return;
+
+    const newDatetime = submission.fields.getTextInputValue('new_datetime');
+    const timestamp = parseDateTimeToTimestamp(newDatetime);
+    if (!timestamp && !newDatetime.match(/^\d{4}-\d{2}-\d{2}/)) {
+        return submission.reply({
+            content: 'Could not parse that time. Try natural language like "next friday 7pm" or a Unix timestamp.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const isMuseumOrKey = raidData.type === 'museum' || raidData.type === 'key';
+
+    // Museum/key: skip roster choice, always create empty
+    if (isMuseumOrKey) {
+        await submission.deferReply({ flags: MessageFlags.Ephemeral });
+        return createDuplicateRaid(submission, raidData, messageId, {
+            datetime: newDatetime,
+            timestamp,
+            copyRoster: false
+        });
+    }
+
+    // Regular raids: ask whether to copy roster
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`raid:dupCopy:${messageId}`)
+            .setLabel('Copy Roster')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId(`raid:dupEmpty:${messageId}`)
+            .setLabel('Start Empty')
+            .setStyle(ButtonStyle.Secondary)
+    );
+
+    await submission.reply({
+        content: `Duplicating raid for **${timestamp ? `<t:${timestamp}:F>` : newDatetime}**.\nCopy the current roster, or start with empty slots?`,
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    });
+
+    const choice = await submission.channel.awaitMessageComponent({
+        filter: (i) => (i.customId === `raid:dupCopy:${messageId}` || i.customId === `raid:dupEmpty:${messageId}`) && i.user.id === interaction.user.id,
+        time: 30000
+    }).catch(() => null);
+
+    if (!choice) {
+        return submission.editReply({ content: 'Selection timed out.', components: [] });
+    }
+
+    const copyRoster = choice.customId === `raid:dupCopy:${messageId}`;
+    await choice.deferUpdate();
+    await submission.editReply({ content: 'Creating duplicate...', components: [] });
+
+    return createDuplicateRaid(submission, raidData, messageId, {
+        datetime: newDatetime,
+        timestamp,
+        copyRoster
+    });
+}
+
+async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId, options) {
+    const { datetime, timestamp, copyRoster } = options;
+    const guild = interaction.guild;
+    const raidId = generateId('', 6);
+
+    // Determine the signup channel
+    let signupChannel;
+    if (sourceRaidData.type === 'museum') {
+        signupChannel = await getMuseumSignupChannel(guild);
+    } else if (sourceRaidData.type === 'key') {
+        signupChannel = await getKeySignupChannel(guild);
+    } else {
+        signupChannel = await getRaidSignupChannel(guild);
+    }
+
+    if (!signupChannel) {
+        return interaction.editReply({ content: 'No signup channel configured. Use `/setchannel` to set one.' });
+    }
+
+    const timestampStr = timestamp ? `<t:${timestamp}:F>` : datetime;
+    let embed;
+    let newRaidData;
+
+    if (sourceRaidData.type === 'museum') {
+        embed = new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle('Museum Signup')
+            .setDescription('React with ✅ to reserve a slot. Max 12 players.')
+            .addFields(
+                { name: '\n**Date + Time:**', value: timestampStr, inline: false },
+                { name: '\u200b', value: `*Raid ID: \`${raidId}\`*\nCreated by <@${interaction.user.id}>`, inline: false }
+            )
+            .setTimestamp(timestamp ? new Date(timestamp * 1000) : undefined);
+
+        newRaidData = {
+            raidId,
+            type: 'museum',
+            signups: [],
+            datetime,
+            timestamp,
+            creatorId: interaction.user.id,
+            guildId: guild.id,
+            maxSlots: sourceRaidData.maxSlots || 12,
+            waitlist: [],
+            channelId: signupChannel.id,
+            threadId: null,
+            creatorReminderSent: false,
+            participantReminderSent: false
+        };
+    } else if (sourceRaidData.type === 'key') {
+        embed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setTitle('Gold Key Boss')
+            .setDescription('React with 🔑 to reserve a slot. Max 12 players.')
+            .addFields(
+                { name: '\n**Date + Time:**', value: timestampStr, inline: false },
+                { name: '\u200b', value: `*Raid ID: \`${raidId}\`*\nCreated by <@${interaction.user.id}>`, inline: false }
+            )
+            .setTimestamp(timestamp ? new Date(timestamp * 1000) : undefined);
+
+        newRaidData = {
+            raidId,
+            type: 'key',
+            signups: [],
+            datetime,
+            timestamp,
+            creatorId: interaction.user.id,
+            guildId: guild.id,
+            maxSlots: sourceRaidData.maxSlots || 12,
+            waitlist: [],
+            channelId: signupChannel.id,
+            threadId: null,
+            creatorReminderSent: false,
+            participantReminderSent: false
+        };
+    } else {
+        // Regular raid — use the source template
+        const template = sourceRaidData.template;
+        if (!template) {
+            return interaction.editReply({ content: 'Could not resolve the raid template for duplication.' });
+        }
+
+        const lengthBadge = sourceRaidData.length ? `\`${sourceRaidData.length} HOUR KEY\`` : '';
+        const description = template.description || '';
+
+        embed = new EmbedBuilder()
+            .setColor(template.color || '#0099ff')
+            .setTitle(`${template.emoji} ${template.name}! ${template.emoji}`)
+            .setDescription(description)
+            .setTimestamp(timestamp ? new Date(timestamp * 1000) : undefined);
+
+        const fields = [
+            { name: '\n**Date + Time:**', value: `${timestampStr}${lengthBadge ? ` || ${lengthBadge}` : ''}`, inline: false }
+        ];
+
+        // Build role group fields from the source signups' groupName structure
+        const groupedRoles = new Map();
+        sourceRaidData.signups.forEach((role) => {
+            const gn = role.groupName || 'Roles';
+            if (!groupedRoles.has(gn)) groupedRoles.set(gn, []);
+            groupedRoles.get(gn).push(role);
+        });
+
+        groupedRoles.forEach((roles, groupName) => {
+            fields.push({
+                name: `\n**${groupName}:**`,
+                value: roles.map((role) => `${role.emoji} ${role.icon || ''} ${role.name}`).join('\n'),
+                inline: false
+            });
+        });
+
+        fields.push({
+            name: '\u200b',
+            value: `*Raid ID: \`${raidId}\`*\nCreated by <@${interaction.user.id}>`,
+            inline: false
+        });
+
+        embed.setFields(fields);
+
+        // Deep clone signups structure
+        const clonedSignups = sourceRaidData.signups.map((role) => ({
+            emoji: role.emoji,
+            icon: role.icon,
+            name: role.name,
+            slots: role.slots,
+            groupName: role.groupName,
+            users: copyRoster ? [...role.users] : [],
+            sideAssignments: copyRoster ? { ...role.sideAssignments } : {},
+            waitlist: []
+        }));
+
+        newRaidData = {
+            raidId,
+            template,
+            signups: clonedSignups,
+            datetime,
+            timestamp,
+            length: sourceRaidData.length,
+            strategy: sourceRaidData.strategy,
+            creatorId: interaction.user.id,
+            guildId: guild.id,
+            channelId: signupChannel.id,
+            threadId: null,
+            creatorReminderSent: false,
+            participantReminderSent: false
+        };
+    }
+
+    // Send the embed to the signup channel
+    const newMessage = await signupChannel.send({ embeds: [embed] });
+
+    // Add reactions
+    try {
+        if (sourceRaidData.type === 'museum') {
+            await newMessage.react('✅');
+        } else if (sourceRaidData.type === 'key') {
+            await newMessage.react('🔑');
+        } else {
+            for (const role of newRaidData.signups) {
+                await newMessage.react(role.emoji);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to add reactions to duplicated raid:', error);
+    }
+
+    // Create discussion thread if guild has threads enabled
+    const settings = getGuildSettings(guild.id);
+    if (settings.threadsEnabled) {
+        try {
+            const threadName = sourceRaidData.type === 'museum'
+                ? `Museum - ${raidId}`
+                : sourceRaidData.type === 'key'
+                    ? `Key Boss - ${raidId}`
+                    : `${sourceRaidData.template?.name || 'Raid'} - ${raidId}`;
+            const thread = await newMessage.startThread({
+                name: threadName,
+                autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
+            });
+            newRaidData.threadId = thread.id;
+            await thread.send(`💬 Discussion thread for **${threadName}** (ID: \`${raidId}\`)\n⏰ Time: ${timestampStr}`);
+        } catch (error) {
+            console.error('Failed to create thread for duplicated raid:', error);
+        }
+    }
+
+    setActiveRaid(newMessage.id, newRaidData);
+
+    // Update the embed with signup data (renders copied roster or empty slots)
+    if (sourceRaidData.type === 'museum') {
+        await updateMuseumEmbed(newMessage, newRaidData);
+    } else if (sourceRaidData.type === 'key') {
+        await updateKeyEmbed(newMessage, newRaidData);
+    } else {
+        await updateRaidEmbed(newMessage, newRaidData);
+    }
+
+    await updateBotPresence();
+
+    const link = `https://discord.com/channels/${guild.id}/${signupChannel.id}/${newMessage.id}`;
+    await interaction.editReply({
+        content: `Raid duplicated! New raid: ${link}\nRaid ID: \`${raidId}\`${copyRoster ? ' (roster copied)' : ''}`
+    });
+
+    const sourceLink = buildMessageLink(sourceRaidData, sourceMessageId);
+    await sendAuditLog(guild, `Raid ${sourceRaidData.raidId} duplicated as ${raidId}`, {
+        title: 'Raid Duplicated',
+        color: 0x5865F2,
+        fields: [
+            { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'Source', value: sourceRaidData.raidId || 'Unknown', inline: true },
+            { name: 'New Raid ID', value: raidId, inline: true },
+            { name: 'Roster', value: copyRoster ? 'Copied' : 'Empty', inline: true },
+            sourceLink ? { name: 'Source raid', value: sourceLink, inline: false } : null,
+            { name: 'New raid', value: link, inline: false }
+        ].filter(Boolean)
     });
 }
 

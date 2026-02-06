@@ -3,6 +3,7 @@ const {
     findRaidByIdInGuild,
     updateRaidEmbed,
     updateMuseumEmbed,
+    updateKeyEmbed,
     fetchRaidMessage
 } = require('../utils/raidHelpers');
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
@@ -15,12 +16,13 @@ module.exports = {
         .setDescription('Assign/remove users or set Lemuria side')
         .addStringOption((option) =>
             option.setName('action')
-                .setDescription('assign | remove | side')
+                .setDescription('assign | remove | side | waitlist')
                 .setRequired(true)
                 .addChoices(
                     { name: 'assign', value: 'assign' },
                     { name: 'remove', value: 'remove' },
-                    { name: 'side', value: 'side' }
+                    { name: 'side', value: 'side' },
+                    { name: 'waitlist', value: 'waitlist' }
                 ))
         .addStringOption((option) =>
             option.setName('raid_id')
@@ -61,6 +63,9 @@ module.exports = {
         }
         if (action === 'side') {
             return assignSide(interaction);
+        }
+        if (action === 'waitlist') {
+            return waitlistSignup(interaction);
         }
         return interaction.reply({
             content: 'Unsupported action.',
@@ -333,6 +338,181 @@ async function assignSignup(interaction) {
 
     return interaction.reply({
         content: `Added ${user.username} to ${role.name}${typeof roleIndex === 'number' ? ` (slot ${roleIndex + 1})` : ''}.`,
+        flags: MessageFlags.Ephemeral
+    });
+}
+
+async function waitlistSignup(interaction) {
+    const raidId = interaction.options.getString('raid_id');
+    const user = interaction.options.getUser('user');
+    const position = interaction.options.getInteger('position');
+    const roleLabel = interaction.options.getString('role');
+
+    const result = findRaidByIdInGuild(interaction.guild, raidId);
+    if (!result) {
+        return interaction.reply({
+            content: 'Raid not found. Make sure the Raid ID is correct.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const { messageId, raidData } = result;
+
+    if (raidData.closed) {
+        return interaction.reply({
+            content: 'Cannot modify waitlist on a closed raid. Reopen it first with `/raid`.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Museum/key: add to raidData.waitlist
+    if (raidData.type === 'museum' || raidData.type === 'key') {
+        raidData.waitlist = raidData.waitlist || [];
+
+        // If already on the waitlist, nothing to do
+        if (raidData.waitlist.includes(user.id)) {
+            return interaction.reply({
+                content: `${user.username} is already on the waitlist.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // Remove from main roster if present (frees a slot)
+        const mainIndex = raidData.signups.indexOf(user.id);
+        if (mainIndex > -1) {
+            raidData.signups.splice(mainIndex, 1);
+        }
+
+        raidData.waitlist.push(user.id);
+
+        const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
+        if (!message) {
+            return interaction.reply({
+                content: 'Could not find the signup message.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // The vacated main slot may promote someone else from the waitlist
+        if (mainIndex > -1) {
+            await processWaitlistOpenings(interaction.client, raidData, messageId);
+        }
+
+        const updateFn = raidData.type === 'museum' ? updateMuseumEmbed : updateKeyEmbed;
+        await updateFn(message, raidData);
+        markActiveRaidUpdated(messageId);
+
+        const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
+        await sendAuditLog(interaction.guild, `Placed ${user.username} on waitlist for ${raidData.type} raid ${raidId}.`, {
+            title: `Waitlist Added (${raidData.type === 'museum' ? 'Museum' : 'Key Boss'})`,
+            color: 0xFFA500,
+            fields: [
+                { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'User', value: `<@${user.id}>`, inline: true },
+                { name: 'Raid ID', value: raidId, inline: true },
+                mainIndex > -1 ? { name: 'Note', value: 'Moved from main roster', inline: false } : null,
+                panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
+            ].filter(Boolean),
+            components: panelLink ? [makePanelButton(panelLink)] : undefined
+        });
+
+        const movedNote = mainIndex > -1 ? ' (moved from main roster)' : '';
+        return interaction.reply({
+            content: `Placed ${user.username} on the waitlist${movedNote}.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Regular raids: resolve role and add to role-specific waitlist
+    const resolution = resolveRoleSelection(raidData.signups, position, roleLabel);
+    if (resolution.error) {
+        return interaction.reply({
+            content: resolution.error,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    const { role, index: roleIndex } = resolution;
+    role.waitlist = role.waitlist || [];
+
+    // Already on this role's waitlist?
+    if (role.waitlist.includes(user.id)) {
+        return interaction.reply({
+            content: `${user.username} is already on the waitlist for ${role.name}.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Remove from any main roster slot (frees a slot for promotion)
+    let wasOnRoster = false;
+    const existingRole = raidData.signups.find((r) => r.users.includes(user.id));
+    if (existingRole) {
+        existingRole.users = existingRole.users.filter((id) => id !== user.id);
+        existingRole.sideAssignments = existingRole.sideAssignments || {};
+        delete existingRole.sideAssignments[user.id];
+        wasOnRoster = true;
+    }
+
+    // Remove from all other role waitlists (prevent multi-waitlist)
+    raidData.signups.forEach((signupRole) => {
+        signupRole.waitlist = signupRole.waitlist || [];
+        if (signupRole !== role) {
+            const idx = signupRole.waitlist.indexOf(user.id);
+            if (idx > -1) {
+                signupRole.waitlist.splice(idx, 1);
+            }
+        }
+    });
+
+    role.waitlist.push(user.id);
+
+    const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
+    if (!message) {
+        return interaction.reply({
+            content: 'Could not find the raid signup message.',
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Remove reaction from old role if they were on the roster
+    if (wasOnRoster && existingRole) {
+        try {
+            const oldReaction = message.reactions.cache.find((r) => r.emoji.name === existingRole.emoji);
+            if (oldReaction) {
+                await oldReaction.users.remove(user.id);
+            }
+        } catch (error) {
+            console.error('Error removing reaction for waitlist move:', error);
+        }
+    }
+
+    // The vacated main slot may promote someone from that role's waitlist
+    if (wasOnRoster) {
+        await processWaitlistOpenings(interaction.client, raidData, messageId);
+    }
+
+    await updateRaidEmbed(message, raidData);
+    markActiveRaidUpdated(messageId);
+
+    const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
+    await sendAuditLog(interaction.guild, `Placed ${user.username} on waitlist for ${role.name} in raid ${raidId}.`, {
+        title: 'Waitlist Added',
+        color: 0xFFA500,
+        fields: [
+            { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'User', value: `<@${user.id}>`, inline: true },
+            { name: 'Raid ID', value: raidId, inline: true },
+            { name: 'Role', value: role.name, inline: true },
+            typeof roleIndex === 'number' ? { name: 'Slot', value: String(roleIndex + 1), inline: true } : null,
+            wasOnRoster ? { name: 'Note', value: 'Moved from main roster', inline: false } : null,
+            panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
+        ].filter(Boolean),
+        components: panelLink ? [makePanelButton(panelLink)] : undefined
+    });
+
+    const movedNote = wasOnRoster ? ' (moved from main roster)' : '';
+    return interaction.reply({
+        content: `Placed ${user.username} on the waitlist for ${role.name}${typeof roleIndex === 'number' ? ` (slot ${roleIndex + 1})` : ''}${movedNote}.`,
         flags: MessageFlags.Ephemeral
     });
 }

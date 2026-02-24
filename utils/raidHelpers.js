@@ -286,59 +286,66 @@ async function updateKeyEmbed(message, raidData) {
         { guild: message.guild, client: message.client },
         { leaderRoleId: guildSettings?.raidLeaderRoleId }
     );
-    const signupLines = raidData.signups
-        .map((userId, idx) => {
-            const label = userLabels.get(userId) || 'Unknown';
-            return `${idx + 1}. [**${label}**](https://discord.com/users/${userId})`;
-        });
-    const fieldValue = signupLines.length > 0
-        ? `${signupLines.join('\n')}\n\nSlots: ${raidData.signups.length}/${raidData.maxSlots}`
-        : `No signups yet.\n\nSlots: 0/${raidData.maxSlots}`;
 
+    const maxPerTeam = raidData.maxPerTeam || 4;
     const raidIdField = existingFields.find((f) => f.value && f.value.includes('Raid ID:'));
     const statusField = existingFields.find((f) => f.name === '\n**Status:**');
+
     const dateField = {
         name: '\n**Date + Time:**',
         value: raidData.timestamp ? `<t:${raidData.timestamp}:F>` : (raidData.datetime || 'Not specified'),
         inline: false
     };
-    const waitlistLines = (raidData.waitlist || [])
-        .map((userId, idx) => {
+
+    const newFields = [dateField];
+
+    // Build per-team fields
+    for (let i = 0; i < raidData.teams.length; i++) {
+        const team = raidData.teams[i];
+        const isFull = team.users.length >= maxPerTeam;
+        const header = `\n**Team ${i + 1} (${team.users.length}/${maxPerTeam})${isFull ? ' — FULL' : ''}:**`;
+
+        const signupLines = team.users.map((userId, idx) => {
             const label = userLabels.get(userId) || 'Unknown';
             return `${idx + 1}. [**${label}**](https://discord.com/users/${userId})`;
         });
-    const newFields = [
-        dateField,
-        {
-            name: '\n**Signups:**',
-            value: fieldValue,
-            inline: false
-        }
-    ];
 
-    if (waitlistLines.length > 0) {
         newFields.push({
-            name: '\n**Waitlist:**',
-            value: waitlistLines.join('\n'),
+            name: header,
+            value: signupLines.length > 0 ? signupLines.join('\n') : 'No signups yet.',
             inline: false
         });
+
+        // Per-team waitlist
+        if (team.waitlist.length > 0) {
+            const waitlistLines = team.waitlist.map((userId, idx) => {
+                const label = userLabels.get(userId) || 'Unknown';
+                return `${idx + 1}. [**${label}**](https://discord.com/users/${userId})`;
+            });
+            newFields.push({
+                name: `**Team ${i + 1} Waitlist:**`,
+                value: waitlistLines.join('\n'),
+                inline: false
+            });
+        }
     }
 
-    if (raidIdField) {
-        newFields.push(raidIdField);
-    }
-    if (statusField) {
-        newFields.push(statusField);
-    }
+    if (raidIdField) newFields.push(raidIdField);
+    if (statusField) newFields.push(statusField);
 
     embed.data.fields = newFields;
     await message.edit({ embeds: [embed] });
 }
 
 function isRaidFull(raidData) {
-    if (raidData.type === 'museum' || raidData.type === 'key') {
+    if (raidData.type === 'museum') {
         const maxSlots = raidData.maxSlots || raidData.signups.length;
         return raidData.signups.length >= maxSlots;
+    }
+
+    if (raidData.type === 'key') {
+        const maxPerTeam = raidData.maxPerTeam || 4;
+        return raidData.teams.every((team) => team.users.length >= maxPerTeam);
     }
 
     const totalSlots = raidData.signups.reduce((sum, role) => sum + (role.slots || 0), 0);

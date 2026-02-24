@@ -136,6 +136,63 @@ async function removeSignup(interaction) {
         });
     }
 
+    if (raidData.type === 'key') {
+        if (!raidData.teams) {
+            return interaction.reply({ content: 'This key raid uses an older format. Cannot modify via command.', flags: MessageFlags.Ephemeral });
+        }
+
+        // Find which team the user is on
+        let foundTeamIndex = -1;
+        let foundUserIndex = -1;
+        for (let i = 0; i < raidData.teams.length; i++) {
+            const idx = raidData.teams[i].users.indexOf(user.id);
+            if (idx > -1) {
+                foundTeamIndex = i;
+                foundUserIndex = idx;
+                break;
+            }
+        }
+
+        if (foundTeamIndex === -1) {
+            return interaction.reply({ content: `${user.username} is not signed up for this key boss event.` });
+        }
+
+        raidData.teams[foundTeamIndex].users.splice(foundUserIndex, 1);
+
+        const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
+        if (!message) {
+            return interaction.reply({ content: 'Could not find the key boss signup message.' });
+        }
+
+        // Remove their reaction for that team
+        const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+        try {
+            const reaction = message.reactions.cache.find((r) => r.emoji.name === teamEmojis[foundTeamIndex]);
+            if (reaction) await reaction.users.remove(user.id);
+        } catch (error) {
+            console.error('Error removing key reaction:', error);
+        }
+
+        await processWaitlistOpenings(interaction.client, raidData, messageId, { teamIndex: foundTeamIndex });
+        await updateKeyEmbed(message, raidData);
+        markActiveRaidUpdated(messageId);
+        const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
+        await sendAuditLog(interaction.guild, `Removed ${user.username} from key boss raid ${raidId} (Team ${foundTeamIndex + 1}).`, {
+            title: 'Signup Removed (Key Boss)',
+            color: 0xFEE75C,
+            fields: [
+                { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'User', value: `<@${user.id}>`, inline: true },
+                { name: 'Raid ID', value: raidId, inline: true },
+                { name: 'Team', value: `Team ${foundTeamIndex + 1}`, inline: true },
+                panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
+            ].filter(Boolean),
+            components: panelLink ? [makePanelButton(panelLink)] : undefined
+        });
+
+        return interaction.reply({ content: `Removed ${user.username} from Team ${foundTeamIndex + 1}.` });
+    }
+
     if (position < 1 || position > raidData.signups.length) {
         return interaction.reply({
             content: `Invalid position. This raid has ${raidData.signups.length} positions.`
@@ -261,6 +318,74 @@ async function assignSignup(interaction) {
         });
     }
 
+    if (raidData.type === 'key') {
+        if (!raidData.teams) {
+            return interaction.reply({ content: 'This key raid uses an older format. Cannot modify via command.', flags: MessageFlags.Ephemeral });
+        }
+
+        // Check if user is already on any team
+        for (let i = 0; i < raidData.teams.length; i++) {
+            if (raidData.teams[i].users.includes(user.id)) {
+                return interaction.reply({
+                    content: `${user.username} is already on Team ${i + 1}.`,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        }
+
+        // Use position as team number (1-based), or default to first team with space
+        const teamIndex = position ? position - 1 : raidData.teams.findIndex(t => t.users.length < (raidData.maxPerTeam || 4));
+        if (teamIndex < 0 || teamIndex >= raidData.teams.length) {
+            return interaction.reply({
+                content: position
+                    ? `Invalid team number. This raid has ${raidData.teams.length} teams.`
+                    : 'All teams are full.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const team = raidData.teams[teamIndex];
+        if (team.users.length >= (raidData.maxPerTeam || 4)) {
+            return interaction.reply({
+                content: `Team ${teamIndex + 1} is full.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        team.users.push(user.id);
+        // Remove from any waitlist
+        for (const t of raidData.teams) {
+            const wIdx = t.waitlist.indexOf(user.id);
+            if (wIdx > -1) t.waitlist.splice(wIdx, 1);
+        }
+
+        const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
+        if (message) {
+            await updateKeyEmbed(message, raidData);
+            markActiveRaidUpdated(messageId);
+            const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
+            await sendAuditLog(interaction.guild, `Assigned ${user.username} to key boss raid ${raidId} (Team ${teamIndex + 1}).`, {
+                title: 'Signup Added (Key Boss)',
+                color: 0x57F287,
+                fields: [
+                    { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: 'User', value: `<@${user.id}>`, inline: true },
+                    { name: 'Raid ID', value: raidId, inline: true },
+                    { name: 'Team', value: `Team ${teamIndex + 1}`, inline: true },
+                    panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
+                ].filter(Boolean),
+                components: panelLink ? [makePanelButton(panelLink)] : undefined
+            });
+        } else {
+            return interaction.reply({ content: 'Could not locate the key boss signup message.', flags: MessageFlags.Ephemeral });
+        }
+
+        return interaction.reply({
+            content: `Added ${user.username} to Team ${teamIndex + 1}.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
     const resolution = resolveRoleSelection(raidData.signups, position, roleLabel);
     if (resolution.error) {
         return interaction.reply({
@@ -365,8 +490,8 @@ async function waitlistSignup(interaction) {
         });
     }
 
-    // Museum/key: add to raidData.waitlist
-    if (raidData.type === 'museum' || raidData.type === 'key') {
+    // Museum: add to raidData.waitlist
+    if (raidData.type === 'museum') {
         raidData.waitlist = raidData.waitlist || [];
 
         // If already on the waitlist, nothing to do
@@ -398,13 +523,12 @@ async function waitlistSignup(interaction) {
             await processWaitlistOpenings(interaction.client, raidData, messageId);
         }
 
-        const updateFn = raidData.type === 'museum' ? updateMuseumEmbed : updateKeyEmbed;
-        await updateFn(message, raidData);
+        await updateMuseumEmbed(message, raidData);
         markActiveRaidUpdated(messageId);
 
         const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
-        await sendAuditLog(interaction.guild, `Placed ${user.username} on waitlist for ${raidData.type} raid ${raidId}.`, {
-            title: `Waitlist Added (${raidData.type === 'museum' ? 'Museum' : 'Key Boss'})`,
+        await sendAuditLog(interaction.guild, `Placed ${user.username} on waitlist for museum raid ${raidId}.`, {
+            title: 'Waitlist Added (Museum)',
             color: 0xFFA500,
             fields: [
                 { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
@@ -419,6 +543,77 @@ async function waitlistSignup(interaction) {
         const movedNote = mainIndex > -1 ? ' (moved from main roster)' : '';
         return interaction.reply({
             content: `Placed ${user.username} on the waitlist${movedNote}.`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    if (raidData.type === 'key') {
+        if (!raidData.teams) {
+            return interaction.reply({ content: 'This key raid uses an older format.', flags: MessageFlags.Ephemeral });
+        }
+
+        // Check if already on a waitlist
+        for (let i = 0; i < raidData.teams.length; i++) {
+            if (raidData.teams[i].waitlist.includes(user.id)) {
+                return interaction.reply({
+                    content: `${user.username} is already on Team ${i + 1}'s waitlist.`,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        }
+
+        // Find which team they're on (if any) and remove from roster
+        let removedFromTeam = -1;
+        for (let i = 0; i < raidData.teams.length; i++) {
+            const idx = raidData.teams[i].users.indexOf(user.id);
+            if (idx > -1) {
+                raidData.teams[i].users.splice(idx, 1);
+                removedFromTeam = i;
+                break;
+            }
+        }
+
+        // Use position as target team waitlist (1-based), or default to first team
+        const targetTeam = position ? position - 1 : (removedFromTeam > -1 ? removedFromTeam : 0);
+        if (targetTeam < 0 || targetTeam >= raidData.teams.length) {
+            return interaction.reply({
+                content: `Invalid team number. This raid has ${raidData.teams.length} teams.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        raidData.teams[targetTeam].waitlist.push(user.id);
+
+        const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
+        if (!message) {
+            return interaction.reply({ content: 'Could not find the signup message.', flags: MessageFlags.Ephemeral });
+        }
+
+        if (removedFromTeam > -1) {
+            await processWaitlistOpenings(interaction.client, raidData, messageId, { teamIndex: removedFromTeam });
+        }
+
+        await updateKeyEmbed(message, raidData);
+        markActiveRaidUpdated(messageId);
+
+        const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
+        const movedNote = removedFromTeam > -1 ? ` (moved from Team ${removedFromTeam + 1} roster)` : '';
+        await sendAuditLog(interaction.guild, `Placed ${user.username} on Team ${targetTeam + 1} waitlist for key boss raid ${raidId}.`, {
+            title: 'Waitlist Added (Key Boss)',
+            color: 0xFFA500,
+            fields: [
+                { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
+                { name: 'User', value: `<@${user.id}>`, inline: true },
+                { name: 'Raid ID', value: raidId, inline: true },
+                { name: 'Team', value: `Team ${targetTeam + 1}`, inline: true },
+                removedFromTeam > -1 ? { name: 'Note', value: `Moved from Team ${removedFromTeam + 1} roster`, inline: false } : null,
+                panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
+            ].filter(Boolean),
+            components: panelLink ? [makePanelButton(panelLink)] : undefined
+        });
+
+        return interaction.reply({
+            content: `Placed ${user.username} on Team ${targetTeam + 1}'s waitlist${movedNote}.`,
             flags: MessageFlags.Ephemeral
         });
     }

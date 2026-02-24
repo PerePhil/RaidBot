@@ -14,11 +14,15 @@ const { sendDebugLog } = require('../auditLog');
  * 3. Optimistic locking (version field) detects concurrent modifications
  * 4. Idempotency check (line 21) handles duplicate promotions gracefully
  */
-async function processWaitlistOpenings(client, raidData, messageId) {
+async function processWaitlistOpenings(client, raidData, messageId, options = {}) {
     if (raidData.closed) return false;
 
-    if (raidData.type === 'museum' || raidData.type === 'key') {
+    if (raidData.type === 'museum') {
         return promoteMuseumWaitlist(client, raidData, messageId);
+    }
+
+    if (raidData.type === 'key') {
+        return promoteKeyTeamWaitlist(client, raidData, messageId, options.teamIndex);
     }
 
     let promoted = false;
@@ -97,6 +101,50 @@ async function promoteMuseumWaitlist(client, raidData, messageId) {
             try {
                 const guild = await client.guilds.fetch(raidData.guildId);
                 sendDebugLog(guild, 'PROMOTED', `<@${userId}> promoted from museum waitlist (\`${raidData.raidId}\`)`);
+            } catch { /* ignore guild fetch errors */ }
+        }
+    }
+
+    if (promoted) {
+        markActiveRaidUpdated(messageId);
+    }
+    return promoted;
+}
+
+async function promoteKeyTeamWaitlist(client, raidData, messageId, teamIndex) {
+    if (teamIndex === undefined || teamIndex < 0 || teamIndex >= raidData.teams.length) return false;
+
+    const team = raidData.teams[teamIndex];
+    if (!team.waitlist || team.waitlist.length === 0) return false;
+
+    const maxPerTeam = raidData.maxPerTeam || 4;
+    if (team.users.length >= maxPerTeam) return false;
+
+    let promoted = false;
+    while (team.waitlist.length > 0 && team.users.length < maxPerTeam) {
+        const userId = team.waitlist.shift();
+        if (!team.users.includes(userId)) {
+            team.users.push(userId);
+
+            // DM the promoted user
+            const link = buildMessageLink(raidData, messageId);
+            const typeLabel = formatRaidType(raidData);
+            const timeLabel = formatTimeLabel(raidData);
+            const lines = [
+                `Good news! A spot opened on Team ${teamIndex + 1} in ${typeLabel} (ID: \`${raidData.raidId}\`).`,
+                `You've been automatically signed up.`,
+                `Scheduled: ${timeLabel}`,
+                link ? `Signup link: ${link}` : null,
+                'If this no longer works for you, please contact a staff member.'
+            ].filter(Boolean);
+            await notifyUser(client, raidData, messageId, userId, lines);
+
+            incrementCounter('waitlist_promotions_total');
+            promoted = true;
+
+            try {
+                const guild = await client.guilds.fetch(raidData.guildId);
+                sendDebugLog(guild, 'PROMOTED', `<@${userId}> promoted from Team ${teamIndex + 1} waitlist (\`${raidData.raidId}\`)`);
             } catch { /* ignore guild fetch errors */ }
         }
     }

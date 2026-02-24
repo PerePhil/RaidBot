@@ -188,6 +188,12 @@ function collectParticipantIds(raidData) {
         return [...raidData.signups];
     }
 
+    if (raidData.type === 'key' && raidData.teams) {
+        const ids = new Set();
+        raidData.teams.forEach(team => team.users.forEach(id => ids.add(id)));
+        return Array.from(ids);
+    }
+
     const ids = new Set();
     raidData.signups.forEach((role) => {
         role.users.forEach((userId) => ids.add(userId));
@@ -303,7 +309,9 @@ async function autoCloseKey(client, raidData, messageId) {
     const message = await fetchRaidMessage(guild, raidData, messageId);
     if (!message) return;
 
-    const signupCount = raidData.signups?.length || 0;
+    const signupCount = raidData.teams
+        ? raidData.teams.reduce((sum, t) => sum + t.users.length, 0)
+        : (raidData.signups?.length || 0);
     const closed = await closeRaidSignup(message, raidData, { reason: 'key_start' });
     if (closed) {
         raidData.autoCloseExecuted = true;

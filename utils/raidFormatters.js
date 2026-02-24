@@ -6,6 +6,10 @@ function formatRaidType(raidData) {
         return 'Museum Signup';
     }
 
+    if (raidData.type === 'key') {
+        return raidData.bossName ? `Gold Key Boss — ${raidData.bossName}` : 'Gold Key Boss';
+    }
+
     if (raidData.template?.name) {
         return raidData.template.name;
     }
@@ -19,6 +23,13 @@ function getSignupStats(raidData) {
         const capacity = raidData.maxSlots || taken;
         const waitlist = raidData.waitlist ? raidData.waitlist.length : 0;
         return { taken, capacity, waitlist };
+    }
+
+    if (raidData.type === 'key' && raidData.teams) {
+        const filled = raidData.teams.reduce((sum, t) => sum + t.users.length, 0);
+        const total = raidData.teams.length * (raidData.maxPerTeam || 4);
+        const waitlist = raidData.teams.reduce((sum, t) => sum + (t.waitlist ? t.waitlist.length : 0), 0);
+        return { taken: filled, capacity: total, waitlist };
     }
 
     let taken = 0;
@@ -90,6 +101,35 @@ async function buildSummaryLines(raidData, options = {}) {
             return [...mainLines, 'Waitlist:', ...waitlistLines];
         }
         return mainLines;
+    }
+
+    if (raidData.type === 'key' && raidData.teams) {
+        const lines = [];
+        for (let idx = 0; idx < raidData.teams.length; idx++) {
+            const team = raidData.teams[idx];
+            const teamLabel = `Team ${idx + 1}`;
+            const count = `${team.users.length}/${raidData.maxPerTeam || 4}`;
+            if (team.users.length > 0) {
+                const resolvedUsers = [];
+                for (const userId of team.users) {
+                    resolvedUsers.push(await resolveUserLabel(context, userId, labelOptions));
+                }
+                lines.push(`**${teamLabel} (${count}):** ${resolvedUsers.join(', ')}`);
+            } else {
+                lines.push(`**${teamLabel} (${count}):** Empty`);
+            }
+
+            const waitlistEntries = team.waitlist || [];
+            if (waitlistEntries.length > 0) {
+                const waitlistLabels = [];
+                for (let wi = 0; wi < waitlistEntries.length; wi++) {
+                    const label = await resolveUserLabel(context, waitlistEntries[wi], labelOptions);
+                    waitlistLabels.push(`${wi + 1}. ${label}`);
+                }
+                lines.push(` └─ Waitlist: ${waitlistLabels.join(', ')}`);
+            }
+        }
+        return lines;
     }
 
     const lines = [];

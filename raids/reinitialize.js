@@ -15,6 +15,7 @@ const {
     updateKeyEmbed,
     getRaidSignupChannel,
     getMuseumSignupChannel,
+    getKeySignupChannel,
     fetchRaidMessage
 } = require('../utils/raidHelpers');
 const { sendDebugLog } = require('../auditLog');
@@ -166,6 +167,7 @@ async function collectChannels(guild) {
     const uniqueChannels = new Map();
     const raidChannel = await getRaidSignupChannel(guild);
     const museumChannel = await getMuseumSignupChannel(guild);
+    const keyChannel = await getKeySignupChannel(guild);
 
     if (raidChannel) {
         uniqueChannels.set(raidChannel.id, raidChannel);
@@ -173,6 +175,10 @@ async function collectChannels(guild) {
 
     if (museumChannel) {
         uniqueChannels.set(museumChannel.id, museumChannel);
+    }
+
+    if (keyChannel) {
+        uniqueChannels.set(keyChannel.id, keyChannel);
     }
 
     return Array.from(uniqueChannels.values());

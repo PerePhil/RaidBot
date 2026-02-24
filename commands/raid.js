@@ -339,7 +339,7 @@ async function showTimeModal(interaction, raidData, messageId) {
         const timestampStr = timestamp ? `<t:${timestamp}:F>` : newDatetime;
         const existingFields = embed.data.fields || [];
         const length = raidData.length || '1.5';
-        const lengthPart = raidData.type === 'museum' ? '' : ` || \`${length} HOUR KEY\``;
+        const lengthPart = (raidData.type === 'museum' || raidData.type === 'key') ? '' : ` || \`${length} HOUR KEY\``;
         const dateFieldValue = `${timestampStr}${lengthPart}`;
 
         const filtered = existingFields.filter((field) => !(typeof field.name === 'string' && field.name.includes('Date + Time')));
@@ -480,7 +480,7 @@ function buildPanelEmbed(raidId, raidData, messageId) {
     const link = buildMessageLink(raidData, messageId);
     const lines = [
         `Raid ID: \`${raidId}\``,
-        `Type: ${raidData.template?.name || (raidData.type === 'museum' ? 'Museum' : 'Raid')}`,
+        `Type: ${raidData.template?.name || (raidData.type === 'museum' ? 'Museum' : raidData.type === 'key' ? 'Gold Key Boss' : 'Raid')}`,
         `Status: ${status}`,
         link ? `Signup: ${link}` : null
     ].filter(Boolean);

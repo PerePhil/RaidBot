@@ -524,28 +524,42 @@ async function syncMuseumReactions(message, raidData) {
 
 /**
  * Syncs reactions from a key boss signup message with stored data.
+ * Iterates over team-based numbered emoji reactions (1️⃣ 2️⃣ 3️⃣ 4️⃣).
  */
 async function syncKeyReactions(message, raidData) {
-    const reaction = message.reactions.cache.find((r) => r.emoji.name === '🔑');
-    if (!reaction) return;
+    const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+
+    // If this is a legacy key raid with flat signups, skip team sync
+    if (!raidData.teams) return;
 
     try {
-        if (reaction.partial) await reaction.fetch();
-        const userCollection = await reaction.users.fetch();
-        const reactionUserIds = [];
+        for (let i = 0; i < raidData.teams.length; i++) {
+            const emoji = teamEmojis[i];
+            const reaction = message.reactions.cache.find((r) => r.emoji.name === emoji);
+            if (!reaction) continue;
 
-        userCollection.forEach((reactUser) => {
-            if (!reactUser.bot && !reactionUserIds.includes(reactUser.id)) {
-                reactionUserIds.push(reactUser.id);
-            }
-        });
+            if (reaction.partial) await reaction.fetch();
+            const userCollection = await reaction.users.fetch();
+            const reactionUserIds = [];
 
-        const maxSlots = raidData.maxSlots || 12;
-        const combinedUsers = mergeUniqueUsers(reactionUserIds, raidData.signups || []);
+            userCollection.forEach((reactUser) => {
+                if (!reactUser.bot && !reactionUserIds.includes(reactUser.id)) {
+                    reactionUserIds.push(reactUser.id);
+                }
+            });
 
-        raidData.signups = combinedUsers.slice(0, maxSlots);
-        raidData.waitlist = (raidData.waitlist || []).filter((userId) => !raidData.signups.includes(userId));
-        raidData.waitlist = [...raidData.waitlist, ...combinedUsers.slice(maxSlots)];
+            const maxPerTeam = raidData.maxPerTeam || 4;
+            const storedUsers = raidData.teams[i].users || [];
+            const combinedUsers = mergeUniqueUsers(reactionUserIds, storedUsers);
+
+            raidData.teams[i].users = combinedUsers.slice(0, maxPerTeam);
+            raidData.teams[i].waitlist = (raidData.teams[i].waitlist || [])
+                .filter((userId) => !raidData.teams[i].users.includes(userId));
+            raidData.teams[i].waitlist = [
+                ...raidData.teams[i].waitlist,
+                ...combinedUsers.slice(maxPerTeam)
+            ];
+        }
     } catch (err) {
         logger.error('Error syncing key reactions:', { error: err });
     }

@@ -438,8 +438,18 @@ async function closeRaidSignup(message, raidData, options = {}) {
         if (added.length > 0) {
             // Create a temporary raidData with only the added participants
             const addedRaidData = { ...raidData };
-            if (raidData.type === 'museum' || raidData.type === 'key') {
+            if (raidData.type === 'museum') {
                 addedRaidData.signups = added.map(p => p.userId);
+            } else if (raidData.type === 'key') {
+                // Reconstruct teams with only added users
+                if (raidData.teams) {
+                    addedRaidData.teams = raidData.teams.map((team, idx) => ({
+                        users: added.filter(p => p.roleName === `Team ${idx + 1}`).map(p => p.userId),
+                        waitlist: []
+                    }));
+                } else {
+                    addedRaidData.signups = added.map(p => p.userId);
+                }
             } else {
                 // For regular raids, reconstruct the signups structure with only added users
                 const roleMap = new Map();

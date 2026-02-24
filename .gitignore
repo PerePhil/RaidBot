@@ -34,6 +34,9 @@ Thumbs.db
 # Agent files
 agents.md
 
+# Worktrees
+.worktrees/
+
 # Optional: uncomment if you want to ignore lock file
 # package-lock.json
 *.md

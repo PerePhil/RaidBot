@@ -854,7 +854,7 @@ function getGuildUserStats(guildId, userId) {
  * @returns {Array} Array of {userId, roleName} objects
  */
 function extractRaidParticipants(raidData) {
-    if (!raidData || !raidData.signups) return [];
+    if (!raidData || (!raidData.signups && !raidData.teams)) return [];
 
     const participants = [];
     const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (raidData.type === 'key' ? 'Key Boss' : 'Raid'));
@@ -864,9 +864,18 @@ function extractRaidParticipants(raidData) {
             participants.push({ userId, roleName: 'Museum' });
         });
     } else if (raidData.type === 'key') {
-        raidData.signups.forEach((userId) => {
-            participants.push({ userId, roleName: 'Key Boss' });
-        });
+        if (raidData.teams) {
+            raidData.teams.forEach((team, idx) => {
+                team.users.forEach((userId) => {
+                    participants.push({ userId, roleName: `Team ${idx + 1}` });
+                });
+            });
+        } else {
+            // Legacy flat format fallback
+            raidData.signups.forEach((userId) => {
+                participants.push({ userId, roleName: 'Key Boss' });
+            });
+        }
     } else {
         raidData.signups.forEach((role) => {
             role.users.forEach((userId) => {
@@ -879,8 +888,12 @@ function extractRaidParticipants(raidData) {
 }
 
 function recordRaidStats(raidData) {
-    if (!raidData || !raidData.signups) return;
-    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : 'Raid');
+    if (!raidData || (!raidData.signups && !raidData.teams)) return;
+    if (raidData.countsForParticipation === false) return;
+    const type = raidData.template?.name
+        || (raidData.type === 'museum' ? 'Museum Signup'
+            : raidData.type === 'key' ? (raidData.bossName ? `Gold Key Boss — ${raidData.bossName}` : 'Gold Key Boss')
+                : 'Raid');
     const timestamp = raidData.timestamp ? raidData.timestamp * 1000 : null;
     const weekday = timestamp ? new Date(timestamp).getDay() : null;
     const guildId = raidData.guildId;
@@ -944,7 +957,13 @@ function recordRaidStats(raidData) {
     if (raidData.type === 'museum') {
         raidData.signups.forEach((userId) => incrementUser(userId, 'Museum'));
     } else if (raidData.type === 'key') {
-        raidData.signups.forEach((userId) => incrementUser(userId, 'Key Boss'));
+        if (raidData.teams) {
+            raidData.teams.forEach((team, idx) => {
+                team.users.forEach((userId) => incrementUser(userId, `Team ${idx + 1}`));
+            });
+        } else {
+            raidData.signups.forEach((userId) => incrementUser(userId, 'Key Boss'));
+        }
     } else {
         raidData.signups.forEach((role) => {
             role.users.forEach((userId) => incrementUser(userId, role.name));
@@ -1030,8 +1049,12 @@ function decrementUserStats(userId, roleName, type, guildId, timestamp) {
  */
 function decrementRaidStats(participants, raidData) {
     if (!participants || participants.length === 0) return;
+    if (raidData.countsForParticipation === false) return;
 
-    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (raidData.type === 'key' ? 'Key Boss' : 'Raid'));
+    const type = raidData.template?.name
+        || (raidData.type === 'museum' ? 'Museum Signup'
+            : raidData.type === 'key' ? (raidData.bossName ? `Gold Key Boss — ${raidData.bossName}` : 'Gold Key Boss')
+                : 'Raid');
     const timestamp = raidData.timestamp ? raidData.timestamp * 1000 : null;
     const guildId = raidData.guildId;
 

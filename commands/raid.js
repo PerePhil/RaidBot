@@ -588,8 +588,14 @@ async function showNoShowSelect(interaction, raidData, messageId) {
 
     // Collect all signed up users
     const participants = [];
-    if (raidData.type === 'museum' || raidData.type === 'key') {
+    if (raidData.type === 'museum') {
         raidData.signups?.forEach(userId => participants.push(userId));
+    } else if (raidData.type === 'key') {
+        if (raidData.teams) {
+            raidData.teams.forEach(team => team.users.forEach(userId => participants.push(userId)));
+        } else {
+            raidData.signups?.forEach(userId => participants.push(userId));
+        }
     } else {
         raidData.signups?.forEach(role => {
             role.users?.forEach(userId => participants.push(userId));
@@ -924,26 +930,38 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
             participantReminderSent: false
         };
     } else if (sourceRaidData.type === 'key') {
+        const title = sourceRaidData.bossName
+            ? `Gold Key Boss — ${sourceRaidData.bossName}`
+            : 'Gold Key Boss';
+        const teamCount = sourceRaidData.teamCount || sourceRaidData.teams?.length || 3;
+
         embed = new EmbedBuilder()
             .setColor('#FFD700')
-            .setTitle('Gold Key Boss')
-            .setDescription('React with 🔑 to reserve a slot. Max 12 players.')
+            .setTitle(title)
+            .setDescription(`React with a team number to sign up.${sourceRaidData.countsForParticipation === false ? '\n⚠️ *This signup does not count toward weekly participation.*' : ''}`)
             .addFields(
                 { name: '\n**Date + Time:**', value: timestampStr, inline: false },
                 { name: '\u200b', value: `*Raid ID: \`${raidId}\`*\nCreated by <@${interaction.user.id}>`, inline: false }
             )
             .setTimestamp(timestamp ? new Date(timestamp * 1000) : undefined);
 
+        const teams = [];
+        for (let i = 0; i < teamCount; i++) {
+            teams.push({ users: [], waitlist: [] });
+        }
+
         newRaidData = {
             raidId,
             type: 'key',
-            signups: [],
+            bossName: sourceRaidData.bossName || null,
+            teamCount,
+            countsForParticipation: sourceRaidData.countsForParticipation !== false,
+            teams,
+            maxPerTeam: 4,
             datetime,
             timestamp,
             creatorId: interaction.user.id,
             guildId: guild.id,
-            maxSlots: sourceRaidData.maxSlots || 12,
-            waitlist: [],
             channelId: signupChannel.id,
             threadId: null,
             creatorReminderSent: false,
@@ -1030,7 +1048,11 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
         if (sourceRaidData.type === 'museum') {
             await newMessage.react('✅');
         } else if (sourceRaidData.type === 'key') {
-            await newMessage.react('🔑');
+            const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+            const teamCount = newRaidData.teamCount || newRaidData.teams?.length || 3;
+            for (let i = 0; i < teamCount; i++) {
+                await newMessage.react(teamEmojis[i]);
+            }
         } else {
             for (const role of newRaidData.signups) {
                 await newMessage.react(role.emoji);
@@ -1047,7 +1069,7 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
             const threadName = sourceRaidData.type === 'museum'
                 ? `Museum - ${raidId}`
                 : sourceRaidData.type === 'key'
-                    ? `Key Boss - ${raidId}`
+                    ? `Key Boss${sourceRaidData.bossName ? ` (${sourceRaidData.bossName})` : ''} - ${raidId}`
                     : `${sourceRaidData.template?.name || 'Raid'} - ${raidId}`;
             const thread = await newMessage.startThread({
                 name: threadName,

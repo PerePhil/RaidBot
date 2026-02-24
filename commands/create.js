@@ -466,11 +466,14 @@ async function createKey(interaction, state, timestamp) {
     }
 
     const raidId = generateRaidId();
+    const teamCount = parseInt(state.teamCount, 10);
     const timestampStr = timestamp ? `<t:${timestamp}:F>` : state.datetime;
+    const title = state.bossName ? `Gold Key Boss — ${state.bossName}` : 'Gold Key Boss';
+
     const embed = new EmbedBuilder()
         .setColor('#FFD700')
-        .setTitle('Gold Key Boss')
-        .setDescription('React with 🔑 to reserve a slot. Max 12 players.')
+        .setTitle(title)
+        .setDescription(`React with a team number to sign up.${state.countsForParticipation === false ? '\n⚠️ *This signup does not count toward weekly participation.*' : ''}`)
         .addFields(
             {
                 name: '\n**Date + Time:**',
@@ -487,34 +490,50 @@ async function createKey(interaction, state, timestamp) {
 
     await interaction.editReply({ content: 'Creating key boss signup...', embeds: [], components: [] });
     const keyMessage = await signupChannel.send({ embeds: [embed] });
-    await keyMessage.react('🔑');
+
+    // Add numbered reactions for each team
+    const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+    for (let i = 0; i < teamCount; i++) {
+        await keyMessage.react(teamEmojis[i]);
+    }
 
     // Create discussion thread if enabled
     let threadId = null;
     const settings = getGuildSettings(interaction.guild.id);
     if (settings.threadsEnabled) {
         try {
+            const threadName = state.bossName
+                ? `Key Boss (${state.bossName}) - ${raidId}`
+                : `Key Boss - ${raidId}`;
             const thread = await keyMessage.startThread({
-                name: `Key Boss - ${raidId}`,
+                name: threadName,
                 autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
             });
             threadId = thread.id;
-            await thread.send(`💬 Discussion thread for **Gold Key Boss** (ID: \`${raidId}\`)\n⏰ Time: <t:${timestamp}:F>`);
+            await thread.send(`💬 Discussion thread for **${title}** (ID: \`${raidId}\`)\n⏰ Time: <t:${timestamp}:F>`);
         } catch (error) {
             console.error('Failed to create key boss thread:', error);
         }
     }
 
+    // Build teams array
+    const teams = [];
+    for (let i = 0; i < teamCount; i++) {
+        teams.push({ users: [], waitlist: [] });
+    }
+
     const raidData = {
         raidId,
         type: 'key',
-        signups: [],
+        bossName: state.bossName || null,
+        teamCount,
+        countsForParticipation: state.countsForParticipation,
+        teams,
+        maxPerTeam: 4,
         datetime: state.datetime,
         timestamp,
         creatorId: interaction.user.id,
         guildId: interaction.guild.id,
-        maxSlots: 12,
-        waitlist: [],
         channelId: signupChannel.id,
         threadId,
         creatorReminderSent: false,

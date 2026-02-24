@@ -274,39 +274,62 @@ async function handleMuseumReactionRemove(reaction, user, raidData) {
     }
 }
 
+const TEAM_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+
+function getTeamIndex(emojiName) {
+    return TEAM_EMOJIS.indexOf(emojiName);
+}
+
+function findUserTeam(raidData, userId) {
+    for (let i = 0; i < raidData.teams.length; i++) {
+        if (raidData.teams[i].users.includes(userId)) return i;
+    }
+    return -1;
+}
+
 async function handleKeyReactionAdd(reaction, user, raidData) {
-    if (reaction.emoji.name !== '🔑') {
+    const teamIndex = getTeamIndex(reaction.emoji.name);
+    if (teamIndex === -1 || teamIndex >= raidData.teams.length) return;
+
+    const existingTeam = findUserTeam(raidData, user.id);
+    if (existingTeam > -1) {
+        await safeDm(user, `You're already signed up for Team ${existingTeam + 1}. Remove your reaction there first to switch teams.`);
         return;
     }
 
-    if (raidData.signups.includes(user.id)) {
-        return;
+    // Also check if on any team's waitlist
+    for (let i = 0; i < raidData.teams.length; i++) {
+        if (raidData.teams[i].waitlist.includes(user.id)) {
+            await safeDm(user, `You're already on the waitlist for Team ${i + 1}. Remove your reaction there first to switch teams.`);
+            return;
+        }
     }
 
-    const maxSlots = raidData.maxSlots || 12;
-    raidData.waitlist = raidData.waitlist || [];
+    const team = raidData.teams[teamIndex];
+    const maxPerTeam = raidData.maxPerTeam || 4;
 
-    if (raidData.signups.length >= maxSlots) {
-        if (!raidData.waitlist.includes(user.id)) {
-            raidData.waitlist.push(user.id);
-            // Record activity for waitlist signup
+    if (team.users.length >= maxPerTeam) {
+        if (!team.waitlist.includes(user.id)) {
+            team.waitlist.push(user.id);
             if (raidData.guildId) {
                 recordUserActivity(raidData.guildId, user.id);
             }
-            sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to key boss waitlist (\`${raidData.raidId}\`)`);
+            sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to key boss Team ${teamIndex + 1} waitlist (\`${raidData.raidId}\`)`);
         }
         await updateKeyEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
-        await safeDm(user, 'The key boss signup is full. You have been added to the waitlist and will be notified when a spot opens.');
+        await safeDm(user, `Team ${teamIndex + 1} is full. You've been added to its waitlist and will be notified when a spot opens.`);
         return;
     }
 
-    raidData.signups.push(user.id);
-    sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for key boss (\`${raidData.raidId}\`)`);
+    team.users.push(user.id);
+    sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for key boss Team ${teamIndex + 1} (\`${raidData.raidId}\`)`);
     await updateKeyEmbed(reaction.message, raidData);
     markActiveRaidUpdated(reaction.message.id);
 
-    if (raidData.signups.length >= maxSlots) {
+    // Notify creator when all teams are full
+    const allFull = raidData.teams.every((t) => t.users.length >= maxPerTeam);
+    if (allFull) {
         try {
             const creator = await reaction.message.client.users.fetch(raidData.creatorId);
             await creator.send(`Your Gold Key Boss signup (ID: \`${raidData.raidId}\`) is now full!`);
@@ -317,23 +340,26 @@ async function handleKeyReactionAdd(reaction, user, raidData) {
 }
 
 async function handleKeyReactionRemove(reaction, user, raidData) {
-    if (reaction.emoji.name !== '🔑') return;
-    raidData.waitlist = raidData.waitlist || [];
+    const teamIndex = getTeamIndex(reaction.emoji.name);
+    if (teamIndex === -1 || teamIndex >= raidData.teams.length) return;
 
-    const signupIndex = raidData.signups.indexOf(user.id);
+    const team = raidData.teams[teamIndex];
+
+    const signupIndex = team.users.indexOf(user.id);
     if (signupIndex > -1) {
-        raidData.signups.splice(signupIndex, 1);
-        sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from key boss (\`${raidData.raidId}\`)`);
+        team.users.splice(signupIndex, 1);
+        sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from key boss Team ${teamIndex + 1} (\`${raidData.raidId}\`)`);
 
-        await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id);
+        // Promote from this team's waitlist
+        await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id, { teamIndex });
         await updateKeyEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
         return;
     }
 
-    const waitlistIndex = raidData.waitlist.indexOf(user.id);
+    const waitlistIndex = team.waitlist.indexOf(user.id);
     if (waitlistIndex > -1) {
-        raidData.waitlist.splice(waitlistIndex, 1);
+        team.waitlist.splice(waitlistIndex, 1);
         await updateKeyEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
     }

@@ -36,6 +36,9 @@ module.exports = {
             timestamp: null,
             length: null,
             strategy: null,
+            teamCount: null,
+            bossName: null,
+            countsForParticipation: true,
             templates: availableTemplates
         };
 
@@ -76,6 +79,57 @@ module.exports = {
 
             if (i.customId === 'create:strategy') {
                 state.strategy = i.values[0];
+                await i.update({
+                    embeds: [buildSummaryEmbed(state)],
+                    components: buildComponents(state)
+                });
+                return;
+            }
+
+            if (i.customId === 'create:teams') {
+                state.teamCount = i.values[0];
+                await i.update({
+                    embeds: [buildSummaryEmbed(state)],
+                    components: buildComponents(state)
+                });
+                return;
+            }
+
+            if (i.customId === 'create:bossname') {
+                const modal = new ModalBuilder()
+                    .setCustomId('create:bossname:modal')
+                    .setTitle('Set boss name')
+                    .addComponents(
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('bossname')
+                                .setLabel('Boss name')
+                                .setStyle(TextInputStyle.Short)
+                                .setPlaceholder('e.g., "Rattlebones"')
+                                .setRequired(true)
+                                .setMaxLength(50)
+                        )
+                    );
+
+                await i.showModal(modal);
+                const submission = await i.awaitModalSubmit({
+                    time: 60 * 1000,
+                    filter: (sub) => sub.customId === 'create:bossname:modal' && sub.user.id === interaction.user.id
+                }).catch(() => null);
+
+                if (!submission) return;
+
+                state.bossName = submission.fields.getTextInputValue('bossname').trim();
+                await submission.reply({ content: 'Boss name set.', flags: MessageFlags.Ephemeral });
+                await interaction.editReply({
+                    embeds: [buildSummaryEmbed(state)],
+                    components: buildComponents(state)
+                }).catch(() => {});
+                return;
+            }
+
+            if (i.customId === 'create:participation') {
+                state.countsForParticipation = !state.countsForParticipation;
                 await i.update({
                     embeds: [buildSummaryEmbed(state)],
                     components: buildComponents(state)
@@ -153,6 +207,9 @@ module.exports = {
 function buildSummaryEmbed(state) {
     const lines = [];
     if (state.type) lines.push(`Type: **${labelForType(state.type)}**`);
+    if (state.bossName) lines.push(`Boss: **${state.bossName}**`);
+    if (state.teamCount) lines.push(`Teams: **${state.teamCount}** (${parseInt(state.teamCount, 10) * 4} slots)`);
+    if (state.type === 'key') lines.push(`Participation: ${state.countsForParticipation ? 'Yes \u2705' : 'No \u274C'}`);
     if (state.datetime) {
         const timestampStr = state.timestamp ? `<t:${state.timestamp}:F>` : state.datetime;
         lines.push(`Time: ${timestampStr}`);
@@ -217,6 +274,30 @@ function buildComponents(state) {
         ));
     }
 
+    if (state.type === 'key') {
+        rows.push(new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('create:teams')
+                .setPlaceholder('Select number of teams')
+                .addOptions(
+                    { label: '1 Team (4 slots)', value: '1', default: state.teamCount === '1' },
+                    { label: '2 Teams (8 slots)', value: '2', default: state.teamCount === '2' },
+                    { label: '3 Teams (12 slots)', value: '3', default: state.teamCount === '3' },
+                    { label: '4 Teams (16 slots)', value: '4', default: state.teamCount === '4' }
+                )
+        ));
+        rows.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('create:bossname')
+                .setLabel(state.bossName ? `Boss: ${state.bossName}` : 'Set boss name')
+                .setStyle(state.bossName ? ButtonStyle.Secondary : ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId('create:participation')
+                .setLabel(state.countsForParticipation ? 'Participation: Yes \u2705' : 'Participation: No \u274C')
+                .setStyle(state.countsForParticipation ? ButtonStyle.Success : ButtonStyle.Danger)
+        ));
+    }
+
     rows.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('create:settime')
@@ -251,6 +332,7 @@ function disableComponents(rows) {
 
 function isReady(state) {
     if (!state.type || !state.datetime) return false;
+    if (state.type === 'key' && !state.teamCount) return false;
     if (state.type !== 'museum' && state.type !== 'key' && !state.length) return false;
     if (state.type === 'dragonspyre' && !state.strategy) return false;
     return true;

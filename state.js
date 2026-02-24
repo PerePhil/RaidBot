@@ -505,6 +505,48 @@ function reconstructRaidData(raid, signups) {
         const stmts = getStatements();
         const waitlist = stmts.getMuseumWaitlist.all(raid.message_id);
         raidData.waitlist = waitlist.map(w => w.user_id);
+
+        // Reconstruct team-based key raids from DB signups
+        if (isKey && signups.some(s => s.role_name && s.role_name.startsWith('Team '))) {
+            const teamMap = new Map();
+            signups.filter(s => !s.is_waitlist).forEach(s => {
+                const match = s.role_name?.match(/Team (\d+)/);
+                const idx = match ? parseInt(match[1], 10) - 1 : 0;
+                if (!teamMap.has(idx)) teamMap.set(idx, { users: [], waitlist: [] });
+                teamMap.get(idx).users.push(s.user_id);
+            });
+            signups.filter(s => s.is_waitlist).forEach(w => {
+                const match = w.role_name?.match(/Team (\d+)/);
+                const idx = match ? parseInt(match[1], 10) - 1 : 0;
+                if (!teamMap.has(idx)) teamMap.set(idx, { users: [], waitlist: [] });
+                teamMap.get(idx).waitlist.push(w.user_id);
+            });
+
+            // Build teams array in order
+            const maxTeamIdx = Math.max(...teamMap.keys(), 0);
+            const teams = [];
+            for (let i = 0; i <= maxTeamIdx; i++) {
+                teams.push(teamMap.get(i) || { users: [], waitlist: [] });
+            }
+
+            raidData.teams = teams;
+            raidData.teamCount = teams.length;
+            raidData.maxPerTeam = 4;
+            delete raidData.signups;
+            delete raidData.waitlist;
+            delete raidData.maxSlots;
+        }
+
+        // Read key raid metadata from template_data
+        if (isKey && raid.template_data) {
+            try {
+                const meta = JSON.parse(raid.template_data);
+                raidData.bossName = meta.bossName || null;
+                raidData.countsForParticipation = meta.countsForParticipation !== false;
+                raidData.teamCount = meta.teamCount || raidData.teams?.length || 1;
+                raidData.maxPerTeam = meta.maxPerTeam || 4;
+            } catch { /* ignore parse errors */ }
+        }
     } else {
         raidData.template = safeJsonParse(raid.template_data, null);
         raidData.length = raid.length;
@@ -617,7 +659,14 @@ function setActiveRaid(messageId, raidData, options = {}) {
             channel_id: raidData.channelId,
             type: raidData.type || 'raid',
             template_slug: raidData.template?.slug || null,
-            template_data: raidData.template ? JSON.stringify(raidData.template) : null,
+            template_data: raidData.type === 'key' && raidData.teams
+                ? JSON.stringify({
+                    bossName: raidData.bossName || null,
+                    countsForParticipation: raidData.countsForParticipation !== false,
+                    teamCount: raidData.teamCount,
+                    maxPerTeam: raidData.maxPerTeam || 4
+                })
+                : (raidData.template ? JSON.stringify(raidData.template) : null),
             datetime: raidData.datetime || null,
             timestamp: raidData.timestamp || null,
             length: raidData.length || null,
@@ -664,8 +713,40 @@ function syncSignupsToDb(messageId, raidData) {
         // Delete existing signups for this raid
         stmts.deleteRaidSignups.run(messageId);
 
-        if (raidData.type === 'museum' || raidData.type === 'key') {
-            // Museum/Key signups
+        if (raidData.type === 'key' && Array.isArray(raidData.teams)) {
+            const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+            raidData.teams.forEach((team, teamIndex) => {
+                team.users.forEach((userId, userIndex) => {
+                    stmts.insertSignup.run({
+                        message_id: messageId,
+                        user_id: userId,
+                        role_name: `Team ${teamIndex + 1}`,
+                        role_emoji: teamEmojis[teamIndex],
+                        role_icon: null,
+                        group_name: null,
+                        slot_index: userIndex,
+                        slots: raidData.maxPerTeam || 4,
+                        is_waitlist: 0,
+                        side_assignment: null
+                    });
+                });
+                (team.waitlist || []).forEach((userId, wIdx) => {
+                    stmts.insertSignup.run({
+                        message_id: messageId,
+                        user_id: userId,
+                        role_name: `Team ${teamIndex + 1}`,
+                        role_emoji: teamEmojis[teamIndex],
+                        role_icon: null,
+                        group_name: null,
+                        slot_index: wIdx,
+                        slots: raidData.maxPerTeam || 4,
+                        is_waitlist: 1,
+                        side_assignment: null
+                    });
+                });
+            });
+        } else if (raidData.type === 'museum' || raidData.type === 'key') {
+            // Museum/Key signups (legacy flat format)
             if (Array.isArray(raidData.signups)) {
                 const roleName = raidData.type === 'key' ? 'Key Boss' : 'Museum';
                 const roleEmoji = raidData.type === 'key' ? '🔑' : '✅';

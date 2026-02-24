@@ -85,6 +85,11 @@ async function buildLabelsForRaid(raidData, context = {}, options = {}) {
     if (raidData.type === 'museum') {
         raidData.signups.forEach((userId) => userIds.add(userId));
         (raidData.waitlist || []).forEach((userId) => userIds.add(userId));
+    } else if (raidData.type === 'key' && raidData.teams) {
+        raidData.teams.forEach(team => {
+            team.users.forEach(userId => userIds.add(userId));
+            (team.waitlist || []).forEach(userId => userIds.add(userId));
+        });
     } else {
         raidData.signups.forEach((role) => {
             role.users.forEach((userId) => userIds.add(userId));

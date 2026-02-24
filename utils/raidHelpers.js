@@ -550,6 +550,11 @@ async function restoreSignupReactions(message, raidData) {
 
     if (raidData.type === 'museum') {
         emojis.add('✅');
+    } else if (raidData.type === 'key' && raidData.teams) {
+        const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+        for (let i = 0; i < raidData.teams.length; i++) {
+            emojis.add(teamEmojis[i]);
+        }
     } else {
         raidData.signups.forEach((role) => {
             if (role.emoji) {

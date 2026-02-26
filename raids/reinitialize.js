@@ -12,13 +12,15 @@ const { deriveSlug } = require('../templatesManager');
 const {
     updateRaidEmbed,
     updateMuseumEmbed,
-    updateKeyEmbed,
+    updateTeamEmbed,
     getRaidSignupChannel,
     getMuseumSignupChannel,
     getKeySignupChannel,
+    getChallengeSignupChannel,
     fetchRaidMessage
 } = require('../utils/raidHelpers');
 const { sendDebugLog } = require('../auditLog');
+const { isTeamBased } = require('../utils/raidTypes');
 
 async function reinitializeRaids(client) {
     logger.info('Restoring stored raids...');
@@ -81,9 +83,9 @@ async function refreshStoredRaids(client) {
             if (raidData.type === 'museum') {
                 await syncMuseumReactions(message, raidData);
                 await updateMuseumEmbed(message, raidData);
-            } else if (raidData.type === 'key') {
-                await syncKeyReactions(message, raidData);
-                await updateKeyEmbed(message, raidData);
+            } else if (isTeamBased(raidData)) {
+                await syncTeamReactions(message, raidData);
+                await updateTeamEmbed(message, raidData);
             } else {
                 await syncRaidReactions(message, raidData);
                 await updateRaidEmbed(message, raidData);
@@ -168,6 +170,7 @@ async function collectChannels(guild) {
     const raidChannel = await getRaidSignupChannel(guild);
     const museumChannel = await getMuseumSignupChannel(guild);
     const keyChannel = await getKeySignupChannel(guild);
+    const challengeChannel = await getChallengeSignupChannel(guild);
 
     if (raidChannel) {
         uniqueChannels.set(raidChannel.id, raidChannel);
@@ -179,6 +182,10 @@ async function collectChannels(guild) {
 
     if (keyChannel) {
         uniqueChannels.set(keyChannel.id, keyChannel);
+    }
+
+    if (challengeChannel) {
+        uniqueChannels.set(challengeChannel.id, challengeChannel);
     }
 
     return Array.from(uniqueChannels.values());
@@ -529,13 +536,13 @@ async function syncMuseumReactions(message, raidData) {
 }
 
 /**
- * Syncs reactions from a key boss signup message with stored data.
+ * Syncs reactions from a team-based signup message (key/challenge) with stored data.
  * Iterates over team-based numbered emoji reactions (1️⃣ 2️⃣ 3️⃣ 4️⃣).
  */
-async function syncKeyReactions(message, raidData) {
+async function syncTeamReactions(message, raidData) {
     const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
 
-    // If this is a legacy key raid with flat signups, skip team sync
+    // If this is a legacy raid with flat signups, skip team sync
     if (!raidData.teams) return;
 
     try {
@@ -567,7 +574,7 @@ async function syncKeyReactions(message, raidData) {
             ];
         }
     } catch (err) {
-        logger.error('Error syncing key reactions:', { error: err });
+        logger.error('Error syncing team reactions:', { error: err });
     }
 }
 

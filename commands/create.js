@@ -16,8 +16,9 @@ const {
     getRaidSignupChannel,
     getMuseumSignupChannel,
     getKeySignupChannel,
+    getChallengeSignupChannel,
     updateMuseumEmbed,
-    updateKeyEmbed
+    updateTeamEmbed
 } = require('../utils/raidHelpers');
 const { updateBotPresence } = require('../presence');
 const { templatesForGuild } = require('../templatesManager');
@@ -96,16 +97,17 @@ module.exports = {
             }
 
             if (i.customId === 'create:bossname') {
+                const isChallenge = state.type === 'challenge';
                 const modal = new ModalBuilder()
                     .setCustomId('create:bossname:modal')
-                    .setTitle('Set boss name')
+                    .setTitle(isChallenge ? 'Set dungeon name' : 'Set boss name')
                     .addComponents(
                         new ActionRowBuilder().addComponents(
                             new TextInputBuilder()
                                 .setCustomId('bossname')
-                                .setLabel('Boss name')
+                                .setLabel(isChallenge ? 'Dungeon name' : 'Boss name')
                                 .setStyle(TextInputStyle.Short)
-                                .setPlaceholder('e.g., "Rattlebones"')
+                                .setPlaceholder(isChallenge ? 'e.g., "Mount Olympus"' : 'e.g., "Rattlebones"')
                                 .setRequired(true)
                                 .setMaxLength(50)
                         )
@@ -207,9 +209,9 @@ module.exports = {
 function buildSummaryEmbed(state) {
     const lines = [];
     if (state.type) lines.push(`Type: **${labelForType(state.type)}**`);
-    if (state.bossName) lines.push(`Boss: **${state.bossName}**`);
+    if (state.bossName) lines.push(`${state.type === 'challenge' ? 'Dungeon' : 'Boss'}: **${state.bossName}**`);
     if (state.teamCount) lines.push(`Teams: **${state.teamCount}** (${parseInt(state.teamCount, 10) * 4} slots)`);
-    if (state.type === 'key') lines.push(`Participation: ${state.countsForParticipation ? 'Yes \u2705' : 'No \u274C'}`);
+    if (state.type === 'key' || state.type === 'challenge') lines.push(`Participation: ${state.countsForParticipation ? 'Yes \u2705' : 'No \u274C'}`);
     if (state.datetime) {
         const timestampStr = state.timestamp ? `<t:${state.timestamp}:F>` : state.datetime;
         lines.push(`Time: ${timestampStr}`);
@@ -237,7 +239,8 @@ function buildComponents(state) {
                 .setPlaceholder('Select activity type')
                 .addOptions(options.concat([
                     { label: 'Museum Signup', value: 'museum' },
-                    { label: 'Gold Key Boss', value: 'key' }
+                    { label: 'Gold Key Boss', value: 'key' },
+                    { label: 'Challenge Mode', value: 'challenge' }
                 ]))
         ));
     } else {
@@ -250,7 +253,7 @@ function buildComponents(state) {
         ));
     }
 
-    if (state.type && state.type !== 'museum' && state.type !== 'key') {
+    if (requiresLength(state.type)) {
         rows.push(new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('create:length')
@@ -274,7 +277,7 @@ function buildComponents(state) {
         ));
     }
 
-    if (state.type === 'key') {
+    if (state.type === 'key' || state.type === 'challenge') {
         rows.push(new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('create:teams')
@@ -286,10 +289,11 @@ function buildComponents(state) {
                     { label: '4 Teams (16 slots)', value: '4', default: state.teamCount === '4' }
                 )
         ));
+        const isChallenge = state.type === 'challenge';
         rows.push(new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('create:bossname')
-                .setLabel(state.bossName ? `Boss: ${state.bossName}` : 'Set boss name')
+                .setLabel(state.bossName ? `${isChallenge ? 'Dungeon' : 'Boss'}: ${state.bossName}` : `Set ${isChallenge ? 'dungeon' : 'boss'} name`)
                 .setStyle(state.bossName ? ButtonStyle.Secondary : ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId('create:participation')
@@ -332,10 +336,14 @@ function disableComponents(rows) {
 
 function isReady(state) {
     if (!state.type || !state.datetime) return false;
-    if (state.type === 'key' && !state.teamCount) return false;
-    if (state.type !== 'museum' && state.type !== 'key' && !state.length) return false;
+    if ((state.type === 'key' || state.type === 'challenge') && !state.teamCount) return false;
+    if (requiresLength(state.type) && !state.length) return false;
     if (state.type === 'dragonspyre' && !state.strategy) return false;
     return true;
+}
+
+function requiresLength(type) {
+    return Boolean(type) && type !== 'museum' && type !== 'key' && type !== 'challenge';
 }
 
 function labelForType(type) {
@@ -344,7 +352,8 @@ function labelForType(type) {
         lemuria: 'Lemuria (Ghastly Conspiracy)',
         polaris: 'Polaris (Cabal\'s Revenge)',
         museum: 'Museum Signup',
-        key: 'Gold Key Boss'
+        key: 'Gold Key Boss',
+        challenge: 'Challenge Mode'
     };
     return map[type] || type;
 }
@@ -369,6 +378,9 @@ async function handleCreate(interaction, state) {
     }
     if (state.type === 'key') {
         return createKey(interaction, state, timestamp);
+    }
+    if (state.type === 'challenge') {
+        return createChallenge(interaction, state, timestamp);
     }
     return createRaid(interaction, state, timestamp);
 }
@@ -541,12 +553,113 @@ async function createKey(interaction, state, timestamp) {
     };
 
     setActiveRaid(keyMessage.id, raidData);
-    await updateKeyEmbed(keyMessage, raidData);
+    await updateTeamEmbed(keyMessage, raidData);
     await updateBotPresence();
 
     const replyContent = threadId
         ? `Key boss signup created in ${signupChannel}! Discussion: <#${threadId}>`
         : `Key boss signup created in ${signupChannel}!`;
+
+    await interaction.editReply({
+        content: replyContent,
+        embeds: [],
+        components: []
+    });
+    return true;
+}
+
+async function createChallenge(interaction, state, timestamp) {
+    const signupChannel = await getChallengeSignupChannel(interaction.guild);
+    if (!signupChannel) {
+        await interaction.followUp({
+            content: 'No challenge mode channel configured. Use `/setchannel` to pick one (or pass the challenge channel option), or create a channel named "challenge-signups".',
+            flags: MessageFlags.Ephemeral
+        });
+        return false;
+    }
+
+    const raidId = generateRaidId();
+    const teamCount = parseInt(state.teamCount, 10);
+    const timestampStr = timestamp ? `<t:${timestamp}:F>` : state.datetime;
+    const title = state.bossName ? `Challenge Mode — ${state.bossName}` : 'Challenge Mode';
+
+    const embed = new EmbedBuilder()
+        .setColor('#FF0000') // Red for Challenge Mode
+        .setTitle(title)
+        .setDescription(`React with a team number to sign up.${state.countsForParticipation === false ? '\n⚠️ *This signup does not count toward weekly participation.*' : ''}`)
+        .addFields(
+            {
+                name: '\n**Date + Time:**',
+                value: timestampStr,
+                inline: false
+            },
+            {
+                name: '\u200b',
+                value: `*Raid ID: \`${raidId}\`*\nCreated by <@${interaction.user.id}>`,
+                inline: false
+            }
+        )
+        .setTimestamp(timestamp ? new Date(timestamp * 1000) : undefined);
+
+    await interaction.editReply({ content: 'Creating challenge mode signup...', embeds: [], components: [] });
+    const challengeMessage = await signupChannel.send({ embeds: [embed] });
+
+    // Add numbered reactions for each team
+    const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+    for (let i = 0; i < teamCount; i++) {
+        await challengeMessage.react(teamEmojis[i]);
+    }
+
+    // Create discussion thread if enabled
+    let threadId = null;
+    const settings = getGuildSettings(interaction.guild.id);
+    if (settings.threadsEnabled) {
+        try {
+            const threadName = state.bossName
+                ? `Challenge Mode (${state.bossName}) - ${raidId}`
+                : `Challenge Mode - ${raidId}`;
+            const thread = await challengeMessage.startThread({
+                name: threadName,
+                autoArchiveDuration: settings.threadAutoArchiveMinutes || 1440
+            });
+            threadId = thread.id;
+            await thread.send(`💬 Discussion thread for **${title}** (ID: \`${raidId}\`)\n⏰ Time: <t:${timestamp}:F>`);
+        } catch (error) {
+            console.error('Failed to create challenge mode thread:', error);
+        }
+    }
+
+    // Build teams array
+    const teams = [];
+    for (let i = 0; i < teamCount; i++) {
+        teams.push({ users: [], waitlist: [] });
+    }
+
+    const raidData = {
+        raidId,
+        type: 'challenge',
+        bossName: state.bossName || null,
+        teamCount,
+        countsForParticipation: state.countsForParticipation,
+        teams,
+        maxPerTeam: 4,
+        datetime: state.datetime,
+        timestamp,
+        creatorId: interaction.user.id,
+        guildId: interaction.guild.id,
+        channelId: signupChannel.id,
+        threadId,
+        creatorReminderSent: false,
+        participantReminderSent: false
+    };
+
+    setActiveRaid(challengeMessage.id, raidData);
+    await updateTeamEmbed(challengeMessage, raidData);
+    await updateBotPresence();
+
+    const replyContent = threadId
+        ? `Challenge mode signup created in ${signupChannel}! Discussion: <#${threadId}>`
+        : `Challenge mode signup created in ${signupChannel}!`;
 
     await interaction.editReply({
         content: replyContent,
@@ -703,3 +816,10 @@ function buildRoleGroups(template, strategy) {
 function generateRaidId() {
     return generateId('', 6);
 }
+
+module.exports.__test = {
+    buildComponents,
+    isReady,
+    requiresLength,
+    handleCreate
+};

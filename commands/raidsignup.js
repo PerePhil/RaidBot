@@ -3,12 +3,13 @@ const {
     findRaidByIdInGuild,
     updateRaidEmbed,
     updateMuseumEmbed,
-    updateKeyEmbed,
+    updateTeamEmbed,
     fetchRaidMessage
 } = require('../utils/raidHelpers');
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
 const { markActiveRaidUpdated } = require('../state');
 const { sendAuditLog } = require('../auditLog');
+const { isTeamBased } = require('../utils/raidTypes');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -136,9 +137,9 @@ async function removeSignup(interaction) {
         });
     }
 
-    if (raidData.type === 'key') {
+    if (isTeamBased(raidData)) {
         if (!raidData.teams) {
-            return interaction.reply({ content: 'This key raid uses an older format. Cannot modify via command.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `This ${raidData.type === 'challenge' ? 'challenge' : 'key'} raid uses an older format. Cannot modify via command.`, flags: MessageFlags.Ephemeral });
         }
 
         // Find which team the user is on
@@ -154,14 +155,14 @@ async function removeSignup(interaction) {
         }
 
         if (foundTeamIndex === -1) {
-            return interaction.reply({ content: `${user.username} is not signed up for this key boss event.` });
+            return interaction.reply({ content: `${user.username} is not signed up for this ${raidData.type === 'challenge' ? 'challenge mode' : 'key boss'} event.` });
         }
 
         raidData.teams[foundTeamIndex].users.splice(foundUserIndex, 1);
 
         const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
         if (!message) {
-            return interaction.reply({ content: 'Could not find the key boss signup message.' });
+            return interaction.reply({ content: `Could not find the ${raidData.type === 'challenge' ? 'challenge mode' : 'key boss'} signup message.` });
         }
 
         // Remove their reaction for that team
@@ -170,15 +171,16 @@ async function removeSignup(interaction) {
             const reaction = message.reactions.cache.find((r) => r.emoji.name === teamEmojis[foundTeamIndex]);
             if (reaction) await reaction.users.remove(user.id);
         } catch (error) {
-            console.error('Error removing key reaction:', error);
+            console.error('Error removing reaction:', error);
         }
 
         await processWaitlistOpenings(interaction.client, raidData, messageId, { teamIndex: foundTeamIndex });
-        await updateKeyEmbed(message, raidData);
+        await updateTeamEmbed(message, raidData);
         markActiveRaidUpdated(messageId);
         const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
-        await sendAuditLog(interaction.guild, `Removed ${user.username} from key boss raid ${raidId} (Team ${foundTeamIndex + 1}).`, {
-            title: 'Signup Removed (Key Boss)',
+        const typeLabel = raidData.type === 'challenge' ? 'Challenge Mode' : 'Key Boss';
+        await sendAuditLog(interaction.guild, `Removed ${user.username} from ${typeLabel} raid ${raidId} (Team ${foundTeamIndex + 1}).`, {
+            title: `Signup Removed (${typeLabel})`,
             color: 0xFEE75C,
             fields: [
                 { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
@@ -186,7 +188,7 @@ async function removeSignup(interaction) {
                 { name: 'Raid ID', value: raidId, inline: true },
                 { name: 'Team', value: `Team ${foundTeamIndex + 1}`, inline: true },
                 panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
-            ].filter(Boolean),
+            ],
             components: panelLink ? [makePanelButton(panelLink)] : undefined
         });
 
@@ -318,9 +320,9 @@ async function assignSignup(interaction) {
         });
     }
 
-    if (raidData.type === 'key') {
+    if (isTeamBased(raidData)) {
         if (!raidData.teams) {
-            return interaction.reply({ content: 'This key raid uses an older format. Cannot modify via command.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `This ${raidData.type === 'challenge' ? 'challenge' : 'key'} raid uses an older format. Cannot modify via command.`, flags: MessageFlags.Ephemeral });
         }
 
         // Check if user is already on any team
@@ -361,11 +363,12 @@ async function assignSignup(interaction) {
 
         const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
         if (message) {
-            await updateKeyEmbed(message, raidData);
+            await updateTeamEmbed(message, raidData);
             markActiveRaidUpdated(messageId);
             const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
-            await sendAuditLog(interaction.guild, `Assigned ${user.username} to key boss raid ${raidId} (Team ${teamIndex + 1}).`, {
-                title: 'Signup Added (Key Boss)',
+            const typeLabel = raidData.type === 'challenge' ? 'Challenge Mode' : 'Key Boss';
+            await sendAuditLog(interaction.guild, `Assigned ${user.username} to ${typeLabel} raid ${raidId} (Team ${teamIndex + 1}).`, {
+                title: `Signup Added (${typeLabel})`,
                 color: 0x57F287,
                 fields: [
                     { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
@@ -373,11 +376,11 @@ async function assignSignup(interaction) {
                     { name: 'Raid ID', value: raidId, inline: true },
                     { name: 'Team', value: `Team ${teamIndex + 1}`, inline: true },
                     panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
-                ].filter(Boolean),
+                ],
                 components: panelLink ? [makePanelButton(panelLink)] : undefined
             });
         } else {
-            return interaction.reply({ content: 'Could not locate the key boss signup message.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `Could not locate the ${raidData.type === 'challenge' ? 'challenge mode' : 'key boss'} signup message.`, flags: MessageFlags.Ephemeral });
         }
 
         return interaction.reply({
@@ -547,9 +550,9 @@ async function waitlistSignup(interaction) {
         });
     }
 
-    if (raidData.type === 'key') {
+    if (isTeamBased(raidData)) {
         if (!raidData.teams) {
-            return interaction.reply({ content: 'This key raid uses an older format.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `This ${raidData.type === 'challenge' ? 'challenge' : 'key'} raid uses an older format.`, flags: MessageFlags.Ephemeral });
         }
 
         // Check if already on a waitlist
@@ -586,20 +589,21 @@ async function waitlistSignup(interaction) {
 
         const message = await fetchRaidMessage(interaction.guild, raidData, messageId);
         if (!message) {
-            return interaction.reply({ content: 'Could not find the signup message.', flags: MessageFlags.Ephemeral });
+            return interaction.reply({ content: `Could not find the ${raidData.type === 'challenge' ? 'challenge mode' : 'key boss'} signup message.`, flags: MessageFlags.Ephemeral });
         }
 
         if (removedFromTeam > -1) {
             await processWaitlistOpenings(interaction.client, raidData, messageId, { teamIndex: removedFromTeam });
         }
 
-        await updateKeyEmbed(message, raidData);
+        await updateTeamEmbed(message, raidData);
         markActiveRaidUpdated(messageId);
 
         const panelLink = buildPanelLink(interaction.guildId, raidData, messageId);
+        const typeLabel = raidData.type === 'challenge' ? 'Challenge Mode' : 'Key Boss';
         const movedNote = removedFromTeam > -1 ? ` (moved from Team ${removedFromTeam + 1} roster)` : '';
-        await sendAuditLog(interaction.guild, `Placed ${user.username} on Team ${targetTeam + 1} waitlist for key boss raid ${raidId}.`, {
-            title: 'Waitlist Added (Key Boss)',
+        await sendAuditLog(interaction.guild, `Placed ${user.username} on Team ${targetTeam + 1} waitlist for ${typeLabel} raid ${raidId}.`, {
+            title: `Waitlist Added (${typeLabel})`,
             color: 0xFFA500,
             fields: [
                 { name: 'By', value: `<@${interaction.user.id}>`, inline: true },
@@ -608,7 +612,7 @@ async function waitlistSignup(interaction) {
                 { name: 'Team', value: `Team ${targetTeam + 1}`, inline: true },
                 removedFromTeam > -1 ? { name: 'Note', value: `Moved from Team ${removedFromTeam + 1} roster`, inline: false } : null,
                 panelLink ? { name: 'View panel', value: panelLink, inline: false } : null
-            ].filter(Boolean),
+            ],
             components: panelLink ? [makePanelButton(panelLink)] : undefined
         });
 

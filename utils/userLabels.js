@@ -1,3 +1,5 @@
+const { isTeamBased } = require('./raidTypes');
+
 const labelCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -85,14 +87,26 @@ async function buildLabelsForRaid(raidData, context = {}, options = {}) {
     if (raidData.type === 'museum') {
         raidData.signups.forEach((userId) => userIds.add(userId));
         (raidData.waitlist || []).forEach((userId) => userIds.add(userId));
-    } else if (raidData.type === 'key' && raidData.teams) {
+    } else if (isTeamBased(raidData) && Array.isArray(raidData.teams)) {
         raidData.teams.forEach(team => {
             team.users.forEach(userId => userIds.add(userId));
             (team.waitlist || []).forEach(userId => userIds.add(userId));
         });
+    } else if (isTeamBased(raidData) && Array.isArray(raidData.signups)) {
+        // Legacy flat format for team-based raids
+        raidData.signups.forEach((entry) => {
+            if (typeof entry === 'string') {
+                userIds.add(entry);
+            } else if (entry && Array.isArray(entry.users)) {
+                entry.users.forEach((userId) => userIds.add(userId));
+                (entry.waitlist || []).forEach((userId) => userIds.add(userId));
+            }
+        });
+        (raidData.waitlist || []).forEach((userId) => userIds.add(userId));
     } else {
-        raidData.signups.forEach((role) => {
-            role.users.forEach((userId) => userIds.add(userId));
+        (raidData.signups || []).forEach((role) => {
+            if (!role) return;
+            (role.users || []).forEach((userId) => userIds.add(userId));
             (role.waitlist || []).forEach((userId) => userIds.add(userId));
         });
     }

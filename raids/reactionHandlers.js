@@ -1,11 +1,12 @@
 const { activeRaids, markActiveRaidUpdated, getSignupRoles, recordUserActivity } = require('../state');
-const { updateRaidEmbed, updateMuseumEmbed, updateKeyEmbed } = require('../utils/raidHelpers');
+const { updateRaidEmbed, updateMuseumEmbed, updateTeamEmbed } = require('../utils/raidHelpers');
 const { processWaitlistOpenings } = require('../utils/waitlistNotifications');
 const { reactionLimiter } = require('../utils/rateLimiter');
 const { Mutex } = require('async-mutex');
 const { logger } = require('../utils/logger');
 const { incrementCounter } = require('../utils/metrics');
 const { sendDebugLog } = require('../auditLog');
+const { isTeamBased } = require('../utils/raidTypes');
 
 // Per-raid mutex locks to prevent race conditions
 const locks = new Map(); // messageId -> Mutex
@@ -74,13 +75,13 @@ async function handleReactionAdd(reaction, user) {
             return;
         }
 
-        if (raidData.type === 'key') {
+        if (isTeamBased(raidData)) {
             if (!allowedCheck.allowed) {
                 await reaction.users.remove(user.id);
-                await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, 'key boss'));
+                await safeDm(user, await buildRestrictionMessage(reaction.guild, allowedCheck.roles, raidData.type === 'challenge' ? 'challenge mode' : 'key boss'));
                 return;
             }
-            await handleKeyReactionAdd(reaction, user, raidData);
+            await handleTeamReactionAdd(reaction, user, raidData);
             return;
         }
 
@@ -177,8 +178,8 @@ async function handleReactionRemove(reaction, user) {
             return;
         }
 
-        if (raidData.type === 'key') {
-            await handleKeyReactionRemove(reaction, user, raidData);
+        if (isTeamBased(raidData)) {
+            await handleTeamReactionRemove(reaction, user, raidData);
             return;
         }
 
@@ -287,7 +288,7 @@ function findUserTeam(raidData, userId) {
     return -1;
 }
 
-async function handleKeyReactionAdd(reaction, user, raidData) {
+async function handleTeamReactionAdd(reaction, user, raidData) {
     const teamIndex = getTeamIndex(reaction.emoji.name);
     if (teamIndex === -1 || teamIndex >= raidData.teams.length) return;
 
@@ -307,6 +308,7 @@ async function handleKeyReactionAdd(reaction, user, raidData) {
 
     const team = raidData.teams[teamIndex];
     const maxPerTeam = raidData.maxPerTeam || 4;
+    const typeLabel = raidData.type === 'challenge' ? 'challenge mode' : 'key boss';
 
     if (team.users.length >= maxPerTeam) {
         if (!team.waitlist.includes(user.id)) {
@@ -314,17 +316,17 @@ async function handleKeyReactionAdd(reaction, user, raidData) {
             if (raidData.guildId) {
                 recordUserActivity(raidData.guildId, user.id);
             }
-            sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to key boss Team ${teamIndex + 1} waitlist (\`${raidData.raidId}\`)`);
+            sendDebugLog(reaction.message.guild, 'WAITLIST', `<@${user.id}> added to ${typeLabel} Team ${teamIndex + 1} waitlist (\`${raidData.raidId}\`)`);
         }
-        await updateKeyEmbed(reaction.message, raidData);
+        await updateTeamEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
         await safeDm(user, `Team ${teamIndex + 1} is full. You've been added to its waitlist and will be notified when a spot opens.`);
         return;
     }
 
     team.users.push(user.id);
-    sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for key boss Team ${teamIndex + 1} (\`${raidData.raidId}\`)`);
-    await updateKeyEmbed(reaction.message, raidData);
+    sendDebugLog(reaction.message.guild, 'SIGNUP', `<@${user.id}> signed up for ${typeLabel} Team ${teamIndex + 1} (\`${raidData.raidId}\`)`);
+    await updateTeamEmbed(reaction.message, raidData);
     markActiveRaidUpdated(reaction.message.id);
 
     // Notify creator when all teams are full
@@ -332,27 +334,29 @@ async function handleKeyReactionAdd(reaction, user, raidData) {
     if (allFull) {
         try {
             const creator = await reaction.message.client.users.fetch(raidData.creatorId);
-            await creator.send(`Your Gold Key Boss signup (ID: \`${raidData.raidId}\`) is now full!`);
+            const creatorLabel = raidData.type === 'challenge' ? 'Challenge Mode' : 'Gold Key Boss';
+            await creator.send(`Your ${creatorLabel} signup (ID: \`${raidData.raidId}\`) is now full!`);
         } catch (error) {
             console.error('Could not send DM to raid creator:', error);
         }
     }
 }
 
-async function handleKeyReactionRemove(reaction, user, raidData) {
+async function handleTeamReactionRemove(reaction, user, raidData) {
     const teamIndex = getTeamIndex(reaction.emoji.name);
     if (teamIndex === -1 || teamIndex >= raidData.teams.length) return;
 
     const team = raidData.teams[teamIndex];
+    const typeLabel = raidData.type === 'challenge' ? 'challenge mode' : 'key boss';
 
     const signupIndex = team.users.indexOf(user.id);
     if (signupIndex > -1) {
         team.users.splice(signupIndex, 1);
-        sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from key boss Team ${teamIndex + 1} (\`${raidData.raidId}\`)`);
+        sendDebugLog(reaction.message.guild, 'UNSIGN', `<@${user.id}> removed from ${typeLabel} Team ${teamIndex + 1} (\`${raidData.raidId}\`)`);
 
         // Promote from this team's waitlist
         await processWaitlistOpenings(reaction.message.client, raidData, reaction.message.id, { teamIndex });
-        await updateKeyEmbed(reaction.message, raidData);
+        await updateTeamEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
         return;
     }
@@ -360,7 +364,7 @@ async function handleKeyReactionRemove(reaction, user, raidData) {
     const waitlistIndex = team.waitlist.indexOf(user.id);
     if (waitlistIndex > -1) {
         team.waitlist.splice(waitlistIndex, 1);
-        await updateKeyEmbed(reaction.message, raidData);
+        await updateTeamEmbed(reaction.message, raidData);
         markActiveRaidUpdated(reaction.message.id);
     }
 }

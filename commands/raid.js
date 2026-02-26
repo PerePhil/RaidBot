@@ -20,9 +20,10 @@ const {
     getRaidSignupChannel,
     getMuseumSignupChannel,
     getKeySignupChannel,
+    getChallengeSignupChannel,
     updateRaidEmbed,
     updateMuseumEmbed,
-    updateKeyEmbed
+    updateTeamEmbed
 } = require('../utils/raidHelpers');
 const { buildMessageLink } = require('../utils/raidFormatters');
 const { updateBotPresence } = require('../presence');
@@ -31,6 +32,7 @@ const { sendAuditLog } = require('../auditLog');
 const { usersAvailableAt } = require('../availabilityManager');
 const { generateId } = require('../utils/idGenerator');
 const { templatesForGuild } = require('../templatesManager');
+const { isTeamBased, getTeamColor, getTeamTypeLabel } = require('../utils/raidTypes');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -339,7 +341,7 @@ async function showTimeModal(interaction, raidData, messageId) {
         const timestampStr = timestamp ? `<t:${timestamp}:F>` : newDatetime;
         const existingFields = embed.data.fields || [];
         const length = raidData.length || '1.5';
-        const lengthPart = (raidData.type === 'museum' || raidData.type === 'key') ? '' : ` || \`${length} HOUR KEY\``;
+        const lengthPart = (raidData.type === 'museum' || isTeamBased(raidData)) ? '' : ` || \`${length} HOUR KEY\``;
         const dateFieldValue = `${timestampStr}${lengthPart}`;
 
         const filtered = existingFields.filter((field) => !(typeof field.name === 'string' && field.name.includes('Date + Time')));
@@ -480,7 +482,7 @@ function buildPanelEmbed(raidId, raidData, messageId) {
     const link = buildMessageLink(raidData, messageId);
     const lines = [
         `Raid ID: \`${raidId}\``,
-        `Type: ${raidData.template?.name || (raidData.type === 'museum' ? 'Museum' : raidData.type === 'key' ? 'Gold Key Boss' : 'Raid')}`,
+        `Type: ${raidData.template?.name || (raidData.type === 'museum' ? 'Museum' : isTeamBased(raidData) ? getTeamTypeLabel(raidData) : 'Raid')}`,
         `Status: ${status}`,
         link ? `Signup: ${link}` : null
     ].filter(Boolean);
@@ -490,7 +492,7 @@ function buildPanelEmbed(raidId, raidData, messageId) {
 }
 
 function buildPanelComponents(messageId, raidData) {
-    const isMuseumOrKey = raidData?.type === 'museum' || raidData?.type === 'key';
+    const isMuseumOrTeam = raidData?.type === 'museum' || isTeamBased(raidData);
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`raid:close:${messageId}`)
@@ -514,7 +516,7 @@ function buildPanelComponents(messageId, raidData) {
             .setCustomId(`raid:length:${messageId}`)
             .setLabel('Change Length')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(isMuseumOrKey)
+            .setDisabled(isMuseumOrTeam)
     );
 
     const row2 = new ActionRowBuilder().addComponents(
@@ -529,7 +531,7 @@ function buildPanelComponents(messageId, raidData) {
             .setLabel('Find Sub')
             .setEmoji('🔍')
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(isMuseumOrKey), // Disabled for museum/key (no roles)
+            .setDisabled(isMuseumOrTeam), // Disabled for museum/team (no roles)
         new ButtonBuilder()
             .setCustomId(`raid:duplicate:${messageId}`)
             .setLabel('Duplicate')
@@ -590,7 +592,7 @@ async function showNoShowSelect(interaction, raidData, messageId) {
     const participants = [];
     if (raidData.type === 'museum') {
         raidData.signups?.forEach(userId => participants.push(userId));
-    } else if (raidData.type === 'key') {
+    } else if (isTeamBased(raidData)) {
         if (raidData.teams) {
             raidData.teams.forEach(team => team.users.forEach(userId => participants.push(userId)));
         } else {
@@ -668,9 +670,9 @@ async function showNoShowSelect(interaction, raidData, messageId) {
 }
 
 async function showFindSubSelect(interaction, raidData, messageId) {
-    if (raidData.type === 'museum' || raidData.type === 'key') {
+    if (raidData.type === 'museum' || isTeamBased(raidData)) {
         return interaction.reply({
-            content: 'Find Sub is not available for museum or key boss signups.',
+            content: `Find Sub is not available for museum or ${raidData.type === 'challenge' ? 'challenge mode' : 'key boss'} signups.`,
             flags: MessageFlags.Ephemeral
         });
     }
@@ -830,10 +832,10 @@ async function showDuplicateFlow(interaction, raidData, messageId) {
         });
     }
 
-    const isMuseumOrKey = raidData.type === 'museum' || raidData.type === 'key';
+    const isMuseumOrTeam = raidData.type === 'museum' || isTeamBased(raidData);
 
-    // Museum/key: skip roster choice, always create empty
-    if (isMuseumOrKey) {
+    // Museum/team: skip roster choice, always create empty
+    if (isMuseumOrTeam) {
         await submission.deferReply({ flags: MessageFlags.Ephemeral });
         return createDuplicateRaid(submission, raidData, messageId, {
             datetime: newDatetime,
@@ -891,6 +893,8 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
         signupChannel = await getMuseumSignupChannel(guild);
     } else if (sourceRaidData.type === 'key') {
         signupChannel = await getKeySignupChannel(guild);
+    } else if (sourceRaidData.type === 'challenge') {
+        signupChannel = await getChallengeSignupChannel(guild);
     } else {
         signupChannel = await getRaidSignupChannel(guild);
     }
@@ -929,14 +933,12 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
             creatorReminderSent: false,
             participantReminderSent: false
         };
-    } else if (sourceRaidData.type === 'key') {
-        const title = sourceRaidData.bossName
-            ? `Gold Key Boss — ${sourceRaidData.bossName}`
-            : 'Gold Key Boss';
+    } else if (isTeamBased(sourceRaidData)) {
+        const title = getTeamTypeLabel(sourceRaidData);
         const teamCount = sourceRaidData.teamCount || sourceRaidData.teams?.length || 3;
 
         embed = new EmbedBuilder()
-            .setColor('#FFD700')
+            .setColor(getTeamColor(sourceRaidData))
             .setTitle(title)
             .setDescription(`React with a team number to sign up.${sourceRaidData.countsForParticipation === false ? '\n⚠️ *This signup does not count toward weekly participation.*' : ''}`)
             .addFields(
@@ -952,7 +954,7 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
 
         newRaidData = {
             raidId,
-            type: 'key',
+            type: sourceRaidData.type,
             bossName: sourceRaidData.bossName || null,
             teamCount,
             countsForParticipation: sourceRaidData.countsForParticipation !== false,
@@ -1047,7 +1049,7 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
     try {
         if (sourceRaidData.type === 'museum') {
             await newMessage.react('✅');
-        } else if (sourceRaidData.type === 'key') {
+        } else if (isTeamBased(sourceRaidData)) {
             const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
             const teamCount = newRaidData.teamCount || newRaidData.teams?.length || 3;
             for (let i = 0; i < teamCount; i++) {
@@ -1068,8 +1070,8 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
         try {
             const threadName = sourceRaidData.type === 'museum'
                 ? `Museum - ${raidId}`
-                : sourceRaidData.type === 'key'
-                    ? `Key Boss${sourceRaidData.bossName ? ` (${sourceRaidData.bossName})` : ''} - ${raidId}`
+                : isTeamBased(sourceRaidData)
+                    ? `${sourceRaidData.type === 'challenge' ? 'Challenge Mode' : 'Key Boss'}${sourceRaidData.bossName ? ` (${sourceRaidData.bossName})` : ''} - ${raidId}`
                     : `${sourceRaidData.template?.name || 'Raid'} - ${raidId}`;
             const thread = await newMessage.startThread({
                 name: threadName,
@@ -1087,8 +1089,8 @@ async function createDuplicateRaid(interaction, sourceRaidData, sourceMessageId,
     // Update the embed with signup data (renders copied roster or empty slots)
     if (sourceRaidData.type === 'museum') {
         await updateMuseumEmbed(newMessage, newRaidData);
-    } else if (sourceRaidData.type === 'key') {
-        await updateKeyEmbed(newMessage, newRaidData);
+    } else if (isTeamBased(sourceRaidData)) {
+        await updateTeamEmbed(newMessage, newRaidData);
     } else {
         await updateRaidEmbed(newMessage, newRaidData);
     }

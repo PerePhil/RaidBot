@@ -3,6 +3,7 @@ const path = require('path');
 const { db, prepare, transaction, initializeSchema } = require('./db/database');
 const { logger } = require('./utils/logger');
 const { incrementCounter, setGauge } = require('./utils/metrics');
+const { isTeamBased } = require('./utils/raidTypes');
 
 const DATA_DIR = path.join(__dirname, 'data');
 function dataPath(filename) {
@@ -29,6 +30,7 @@ const activeRaids = new Map();
 const raidChannels = new Map();
 const museumChannels = new Map();
 const keyChannels = new Map();
+const challengeChannels = new Map();
 const guildSettings = new Map();
 const raidStats = new Map();
 const guildParticipation = new Map();
@@ -46,11 +48,11 @@ function getStatements() {
         // Guilds
         getGuild: prepare('SELECT * FROM guilds WHERE id = ?'),
         upsertGuild: prepare(`
-            INSERT INTO guilds (id, raid_channel_id, museum_channel_id, key_channel_id, audit_channel_id,
+            INSERT INTO guilds (id, raid_channel_id, museum_channel_id, key_channel_id, challenge_channel_id, audit_channel_id,
                 creator_reminder_seconds, participant_reminder_seconds, auto_close_seconds,
                 last_auto_close_seconds, creator_reminders_enabled, participant_reminders_enabled,
                 raid_leader_role_id, threads_enabled, thread_auto_archive_minutes)
-            VALUES (@id, @raid_channel_id, @museum_channel_id, @key_channel_id, @audit_channel_id,
+            VALUES (@id, @raid_channel_id, @museum_channel_id, @key_channel_id, @challenge_channel_id, @audit_channel_id,
                 @creator_reminder_seconds, @participant_reminder_seconds, @auto_close_seconds,
                 @last_auto_close_seconds, @creator_reminders_enabled, @participant_reminders_enabled,
                 @raid_leader_role_id, @threads_enabled, @thread_auto_archive_minutes)
@@ -58,6 +60,7 @@ function getStatements() {
                 raid_channel_id = excluded.raid_channel_id,
                 museum_channel_id = excluded.museum_channel_id,
                 key_channel_id = excluded.key_channel_id,
+                challenge_channel_id = excluded.challenge_channel_id,
                 audit_channel_id = excluded.audit_channel_id,
                 creator_reminder_seconds = excluded.creator_reminder_seconds,
                 participant_reminder_seconds = excluded.participant_reminder_seconds,
@@ -72,6 +75,7 @@ function getStatements() {
         updateGuildChannel: prepare('UPDATE guilds SET raid_channel_id = ? WHERE id = ?'),
         updateMuseumChannel: prepare('UPDATE guilds SET museum_channel_id = ? WHERE id = ?'),
         updateKeyChannel: prepare('UPDATE guilds SET key_channel_id = ? WHERE id = ?'),
+        updateChallengeChannel: prepare('UPDATE guilds SET challenge_channel_id = ? WHERE id = ?'),
 
         // Raids
         getRaid: prepare('SELECT * FROM raids WHERE message_id = ?'),
@@ -271,6 +275,30 @@ function setKeyChannel(guildId, channelId) {
     }
 }
 
+// ===== CHALLENGE CHANNELS =====
+
+function loadChallengeChannels() {
+    challengeChannels.clear();
+    const rows = prepare('SELECT id, challenge_channel_id FROM guilds WHERE challenge_channel_id IS NOT NULL').all();
+    rows.forEach(row => challengeChannels.set(row.id, row.challenge_channel_id));
+    logger.info(`Loaded ${challengeChannels.size} challenge channel configurations`);
+}
+
+function saveChallengeChannels() {
+    // Immediate persistence is handled in setChallengeChannel
+}
+
+function setChallengeChannel(guildId, channelId) {
+    const stmts = getStatements();
+    stmts.ensureGuild.run(guildId);
+    stmts.updateChallengeChannel.run(channelId, guildId);
+    if (channelId) {
+        challengeChannels.set(guildId, channelId);
+    } else {
+        challengeChannels.delete(guildId);
+    }
+}
+
 // ===== ADMIN ROLES =====
 
 function loadAdminRoles() {
@@ -442,6 +470,7 @@ function updateGuildSettings(guildId, updates) {
         raid_channel_id: row?.raid_channel_id || raidChannels.get(guildId) || null,
         museum_channel_id: row?.museum_channel_id || museumChannels.get(guildId) || null,
         key_channel_id: row?.key_channel_id || keyChannels.get(guildId) || null,
+        challenge_channel_id: row?.challenge_channel_id || challengeChannels.get(guildId) || null,
         audit_channel_id: row?.audit_channel_id || null,
         creator_reminder_seconds: newSettings.creatorReminderSeconds,
         participant_reminder_seconds: newSettings.participantReminderSeconds,
@@ -475,6 +504,8 @@ function loadActiveRaidState() {
 function reconstructRaidData(raid, signups) {
     const isMuseum = raid.type === 'museum';
     const isKey = raid.type === 'key';
+    const isChallenge = raid.type === 'challenge';
+    const isTeam = isKey || isChallenge;
 
     const raidData = {
         raidId: raid.raid_id,
@@ -498,16 +529,16 @@ function reconstructRaidData(raid, signups) {
         version: raid.version || 1  // Load version for optimistic locking
     };
 
-    if (isMuseum || isKey) {
+    if (isMuseum || isTeam) {
         raidData.maxSlots = raid.max_slots || 12;
         raidData.signups = signups.filter(s => !s.is_waitlist).map(s => s.user_id);
-        // Load waitlist (using museum_waitlist table for both museum and key)
+        // Load waitlist (using museum_waitlist table for all team-based types)
         const stmts = getStatements();
         const waitlist = stmts.getMuseumWaitlist.all(raid.message_id);
         raidData.waitlist = waitlist.map(w => w.user_id);
 
-        // Reconstruct team-based key raids from DB signups
-        if (isKey && signups.some(s => s.role_name && s.role_name.startsWith('Team '))) {
+        // Reconstruct team-based raids from DB signups
+        if (isTeam && signups.some(s => s.role_name && s.role_name.startsWith('Team '))) {
             const teamMap = new Map();
             signups.filter(s => !s.is_waitlist).forEach(s => {
                 const match = s.role_name?.match(/Team (\d+)/);
@@ -537,8 +568,8 @@ function reconstructRaidData(raid, signups) {
             delete raidData.maxSlots;
         }
 
-        // Read key raid metadata from template_data
-        if (isKey && raid.template_data) {
+        // Read team raid metadata from template_data
+        if (isTeam && raid.template_data) {
             try {
                 const meta = JSON.parse(raid.template_data);
                 raidData.bossName = meta.bossName || null;
@@ -659,7 +690,7 @@ function setActiveRaid(messageId, raidData, options = {}) {
             channel_id: raidData.channelId,
             type: raidData.type || 'raid',
             template_slug: raidData.template?.slug || null,
-            template_data: raidData.type === 'key' && raidData.teams
+            template_data: isTeamBased(raidData) && raidData.teams
                 ? JSON.stringify({
                     bossName: raidData.bossName || null,
                     countsForParticipation: raidData.countsForParticipation !== false,
@@ -713,7 +744,7 @@ function syncSignupsToDb(messageId, raidData) {
         // Delete existing signups for this raid
         stmts.deleteRaidSignups.run(messageId);
 
-        if (raidData.type === 'key' && Array.isArray(raidData.teams)) {
+        if (isTeamBased(raidData) && Array.isArray(raidData.teams)) {
             const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
             raidData.teams.forEach((team, teamIndex) => {
                 team.users.forEach((userId, userIndex) => {
@@ -745,11 +776,11 @@ function syncSignupsToDb(messageId, raidData) {
                     });
                 });
             });
-        } else if (raidData.type === 'museum' || raidData.type === 'key') {
+        } else if (raidData.type === 'museum' || isTeamBased(raidData)) {
             // Museum/Key signups (legacy flat format)
             if (Array.isArray(raidData.signups)) {
-                const roleName = raidData.type === 'key' ? 'Key Boss' : 'Museum';
-                const roleEmoji = raidData.type === 'key' ? '🔑' : '✅';
+                const roleName = raidData.type === 'key' ? 'Key Boss' : (raidData.type === 'challenge' ? 'Challenge' : 'Museum');
+                const roleEmoji = raidData.type === 'key' ? '🔑' : (raidData.type === 'challenge' ? '⚔️' : '✅');
                 raidData.signups.forEach((userId, index) => {
                     stmts.insertSignup.run({
                         message_id: messageId,
@@ -938,13 +969,13 @@ function extractRaidParticipants(raidData) {
     if (!raidData || (!raidData.signups && !raidData.teams)) return [];
 
     const participants = [];
-    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (raidData.type === 'key' ? 'Key Boss' : 'Raid'));
+    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (isTeamBased(raidData) ? (raidData.type === 'challenge' ? 'Challenge Mode' : 'Key Boss') : 'Raid'));
 
     if (raidData.type === 'museum') {
         raidData.signups.forEach((userId) => {
             participants.push({ userId, roleName: 'Museum' });
         });
-    } else if (raidData.type === 'key') {
+    } else if (isTeamBased(raidData)) {
         if (raidData.teams) {
             raidData.teams.forEach((team, idx) => {
                 team.users.forEach((userId) => {
@@ -953,8 +984,9 @@ function extractRaidParticipants(raidData) {
             });
         } else {
             // Legacy flat format fallback
+            const roleName = raidData.type === 'challenge' ? 'Challenge' : 'Key Boss';
             raidData.signups.forEach((userId) => {
-                participants.push({ userId, roleName: 'Key Boss' });
+                participants.push({ userId, roleName });
             });
         }
     } else {
@@ -974,7 +1006,8 @@ function recordRaidStats(raidData) {
     const type = raidData.template?.name
         || (raidData.type === 'museum' ? 'Museum Signup'
             : raidData.type === 'key' ? (raidData.bossName ? `Gold Key Boss — ${raidData.bossName}` : 'Gold Key Boss')
-                : 'Raid');
+                : raidData.type === 'challenge' ? (raidData.bossName ? `Challenge Mode — ${raidData.bossName}` : 'Challenge Mode')
+                    : 'Raid');
     const timestamp = raidData.timestamp ? raidData.timestamp * 1000 : null;
     const weekday = timestamp ? new Date(timestamp).getDay() : null;
     const guildId = raidData.guildId;
@@ -1037,13 +1070,14 @@ function recordRaidStats(raidData) {
 
     if (raidData.type === 'museum') {
         raidData.signups.forEach((userId) => incrementUser(userId, 'Museum'));
-    } else if (raidData.type === 'key') {
+    } else if (isTeamBased(raidData)) {
         if (raidData.teams) {
             raidData.teams.forEach((team, idx) => {
                 team.users.forEach((userId) => incrementUser(userId, `Team ${idx + 1}`));
             });
         } else {
-            raidData.signups.forEach((userId) => incrementUser(userId, 'Key Boss'));
+            const roleName = raidData.type === 'challenge' ? 'Challenge' : 'Key Boss';
+            raidData.signups.forEach((userId) => incrementUser(userId, roleName));
         }
     } else {
         raidData.signups.forEach((role) => {
@@ -1135,7 +1169,8 @@ function decrementRaidStats(participants, raidData) {
     const type = raidData.template?.name
         || (raidData.type === 'museum' ? 'Museum Signup'
             : raidData.type === 'key' ? (raidData.bossName ? `Gold Key Boss — ${raidData.bossName}` : 'Gold Key Boss')
-                : 'Raid');
+                : raidData.type === 'challenge' ? (raidData.bossName ? `Challenge Mode — ${raidData.bossName}` : 'Challenge Mode')
+                    : 'Raid');
     const timestamp = raidData.timestamp ? raidData.timestamp * 1000 : null;
     const guildId = raidData.guildId;
 
@@ -1325,6 +1360,7 @@ module.exports = {
     raidChannels,
     museumChannels,
     keyChannels,
+    challengeChannels,
     guildSettings,
     raidStats,
     guildParticipation,
@@ -1337,6 +1373,9 @@ module.exports = {
     loadKeyChannels,
     saveKeyChannels,
     setKeyChannel,
+    loadChallengeChannels,
+    saveChallengeChannels,
+    setChallengeChannel,
     loadAdminRoles,
     saveAdminRoles,
     getAdminRoles,

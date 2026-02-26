@@ -6,6 +6,7 @@ const { sendAuditLog } = require('./auditLog');
 const { checkAndSpawnRecurringRaids } = require('./recurringManager');
 const { logger } = require('./utils/logger');
 const { sendDMWithBreaker, fetchWithBreaker } = require('./utils/circuitBreaker');
+const { isTeamBased, getTeamTypeLabel } = require('./utils/raidTypes');
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const DM_DELAY_MS = 10 * 1000; // Deprecated: kept for compatibility
@@ -55,9 +56,9 @@ async function runReminderCheck() {
             continue;
         }
 
-        // Auto-close key boss raids at start time to lock signups and record analytics
-        if (!raidData.closed && raidData.type === 'key' && !raidData.autoCloseExecuted && secondsUntil <= 0) {
-            await autoCloseKey(client, raidData, messageId);
+        // Auto-close team-based raids (key/challenge) at start time
+        if (!raidData.closed && isTeamBased(raidData) && !raidData.autoCloseExecuted && secondsUntil <= 0) {
+            await autoCloseTeamRaid(client, raidData, messageId);
             continue;
         }
 
@@ -114,7 +115,7 @@ async function sendCreatorReminder(client, raidData, messageId) {
 
         const link = buildMessageLink(raidData, messageId);
         const when = formatTimeLabel(raidData);
-        const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : 'Raid');
+        const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (isTeamBased(raidData) ? getTeamTypeLabel(raidData) : 'Raid'));
 
         const sent = await sendDMWithBreaker(creator, [
             `Reminder: your ${type} (ID: \`${raidData.raidId}\`) starts soon.`,
@@ -144,7 +145,7 @@ async function sendParticipantReminder(client, raidData, messageId) {
 
     const link = buildMessageLink(raidData, messageId);
     const when = formatTimeLabel(raidData);
-    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : 'Raid');
+    const type = raidData.template?.name || (raidData.type === 'museum' ? 'Museum Signup' : (isTeamBased(raidData) ? getTeamTypeLabel(raidData) : 'Raid'));
 
     // Batch DMs for better performance (5 DMs in parallel, 1.2s delay between batches)
     // This reduces send time from ~17 min (100 users @ 10s each) to ~24s (100 users @ 5/batch)
@@ -188,7 +189,7 @@ function collectParticipantIds(raidData) {
         return [...raidData.signups];
     }
 
-    if (raidData.type === 'key' && raidData.teams) {
+    if (isTeamBased(raidData) && raidData.teams) {
         const ids = new Set();
         raidData.teams.forEach(team => team.users.forEach(id => ids.add(id)));
         return Array.from(ids);
@@ -203,6 +204,13 @@ function collectParticipantIds(raidData) {
 
 function findUserRoleName(raidData, userId) {
     if (raidData.type === 'museum') {
+        return null;
+    }
+
+    if (isTeamBased(raidData) && raidData.teams) {
+        for (let i = 0; i < raidData.teams.length; i++) {
+            if (raidData.teams[i].users.includes(userId)) return `Team ${i + 1}`;
+        }
         return null;
     }
 
@@ -297,9 +305,9 @@ async function autoCloseMuseum(client, raidData, messageId) {
 }
 
 /**
- * Auto-close key boss raids at start time to lock signups and record attendance analytics
+ * Auto-close team-based raids (key/challenge) at start time
  */
-async function autoCloseKey(client, raidData, messageId) {
+async function autoCloseTeamRaid(client, raidData, messageId) {
     if (!raidData.guildId) return;
     if (raidData.closed) return;
 
@@ -312,11 +320,16 @@ async function autoCloseKey(client, raidData, messageId) {
     const signupCount = raidData.teams
         ? raidData.teams.reduce((sum, t) => sum + t.users.length, 0)
         : (raidData.signups?.length || 0);
-    const closed = await closeRaidSignup(message, raidData, { reason: 'key_start' });
+
+    const isChallenge = raidData.type === 'challenge';
+    const reason = isChallenge ? 'challenge_start' : 'key_start';
+    const typeLabel = isChallenge ? 'Challenge Mode' : 'Gold Key Boss';
+
+    const closed = await closeRaidSignup(message, raidData, { reason });
     if (closed) {
         raidData.autoCloseExecuted = true;
         await updateBotPresence();
         markActiveRaidUpdated(messageId);
-        await sendAuditLog(guild, `Gold Key Boss ${raidData.raidId || '?'} auto-locked at start time with ${signupCount} participant(s). Attendance recorded for analytics.`);
+        await sendAuditLog(guild, `${typeLabel} ${raidData.raidId || '?'} auto-locked at start time with ${signupCount} participant(s). Attendance recorded for analytics.`);
     }
 }

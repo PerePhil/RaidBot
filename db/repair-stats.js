@@ -15,6 +15,16 @@ const { db, initializeSchema } = require('./database');
 
 const isDryRun = process.argv.includes('--dry-run');
 
+function parseBossName(templateData) {
+    if (!templateData) return null;
+    try {
+        const parsed = JSON.parse(templateData);
+        return parsed?.bossName || null;
+    } catch {
+        return null;
+    }
+}
+
 function repairStats() {
     console.log('='.repeat(50));
     console.log('WizBot Stats Repair Tool');
@@ -90,7 +100,11 @@ function repairStats() {
         if (type === 'museum') {
             templateName = 'Museum Signup';
         } else if (type === 'key') {
-            templateName = 'Key Boss';
+            const bossName = parseBossName(template_data);
+            templateName = bossName ? `Gold Key Boss — ${bossName}` : 'Gold Key Boss';
+        } else if (type === 'challenge') {
+            const bossName = parseBossName(template_data);
+            templateName = bossName ? `Challenge Mode — ${bossName}` : 'Challenge Mode';
         } else if (template_data) {
             try {
                 const template = JSON.parse(template_data);

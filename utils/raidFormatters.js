@@ -1,13 +1,14 @@
 const { resolveUserLabel } = require('./userLabels');
 const { getGuildSettings } = require('../state');
+const { isTeamBased, getTeamTypeLabel } = require('./raidTypes');
 
 function formatRaidType(raidData) {
     if (raidData.type === 'museum') {
         return 'Museum Signup';
     }
 
-    if (raidData.type === 'key') {
-        return raidData.bossName ? `Gold Key Boss — ${raidData.bossName}` : 'Gold Key Boss';
+    if (isTeamBased(raidData)) {
+        return getTeamTypeLabel(raidData);
     }
 
     if (raidData.template?.name) {
@@ -25,7 +26,7 @@ function getSignupStats(raidData) {
         return { taken, capacity, waitlist };
     }
 
-    if (raidData.type === 'key' && raidData.teams) {
+    if (isTeamBased(raidData) && raidData.teams) {
         const filled = raidData.teams.reduce((sum, t) => sum + t.users.length, 0);
         const total = raidData.teams.length * (raidData.maxPerTeam || 4);
         const waitlist = raidData.teams.reduce((sum, t) => sum + (t.waitlist ? t.waitlist.length : 0), 0);
@@ -103,7 +104,7 @@ async function buildSummaryLines(raidData, options = {}) {
         return mainLines;
     }
 
-    if (raidData.type === 'key' && raidData.teams) {
+    if (isTeamBased(raidData) && raidData.teams) {
         const lines = [];
         for (let idx = 0; idx < raidData.teams.length; idx++) {
             const team = raidData.teams[idx];

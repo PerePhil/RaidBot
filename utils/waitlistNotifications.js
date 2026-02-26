@@ -4,6 +4,7 @@ const { logger } = require('./logger');
 const { incrementCounter } = require('./metrics');
 const { sendDMWithBreaker } = require('./circuitBreaker');
 const { sendDebugLog } = require('../auditLog');
+const { isTeamBased } = require('./raidTypes');
 
 /**
  * Process waitlist promotions when slots open up
@@ -21,8 +22,8 @@ async function processWaitlistOpenings(client, raidData, messageId, options = {}
         return promoteMuseumWaitlist(client, raidData, messageId);
     }
 
-    if (raidData.type === 'key') {
-        return promoteKeyTeamWaitlist(client, raidData, messageId, options.teamIndex);
+    if (isTeamBased(raidData)) {
+        return promoteTeamWaitlist(client, raidData, messageId, options.teamIndex);
     }
 
     let promoted = false;
@@ -111,7 +112,7 @@ async function promoteMuseumWaitlist(client, raidData, messageId) {
     return promoted;
 }
 
-async function promoteKeyTeamWaitlist(client, raidData, messageId, teamIndex) {
+async function promoteTeamWaitlist(client, raidData, messageId, teamIndex) {
     if (teamIndex === undefined || teamIndex < 0 || teamIndex >= raidData.teams.length) return false;
 
     const team = raidData.teams[teamIndex];
@@ -144,7 +145,8 @@ async function promoteKeyTeamWaitlist(client, raidData, messageId, teamIndex) {
 
             try {
                 const guild = await client.guilds.fetch(raidData.guildId);
-                sendDebugLog(guild, 'PROMOTED', `<@${userId}> promoted from Team ${teamIndex + 1} waitlist (\`${raidData.raidId}\`)`);
+                const typeName = raidData.type === 'challenge' ? 'challenge mode' : 'key boss';
+                sendDebugLog(guild, 'PROMOTED', `<@${userId}> promoted from ${typeName} Team ${teamIndex + 1} waitlist (\`${raidData.raidId}\`)`);
             } catch { /* ignore guild fetch errors */ }
         }
     }

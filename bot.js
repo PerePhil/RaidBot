@@ -6,6 +6,7 @@ const {
     loadRaidChannels,
     loadMuseumChannels,
     loadKeyChannels,
+    loadChallengeChannels,
     loadGuildSettings,
     loadRaidStats,
     getAdminRoles,
@@ -54,6 +55,7 @@ client.once('clientReady', async () => {
     loadRaidChannels();
     loadMuseumChannels();
     loadKeyChannels();
+    loadChallengeChannels();
     loadGuildSettings();
     loadRaidStats();
     loadTemplateOverrides();

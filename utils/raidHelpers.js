@@ -1,11 +1,12 @@
 const chrono = require('chrono-node');
 const { EmbedBuilder, ChannelType } = require('discord.js');
-const { activeRaids, raidChannels, museumChannels, keyChannels, recordRaidStats, decrementRaidStats, extractRaidParticipants, getGuildSettings } = require('../state');
+const { activeRaids, raidChannels, museumChannels, keyChannels, challengeChannels, recordRaidStats, decrementRaidStats, extractRaidParticipants, getGuildSettings } = require('../state');
 const { recordRaidAnalytics, decrementRaidAnalytics } = require('./analytics');
 const { sendAuditLog } = require('../auditLog');
 const { buildLabelsForRaid } = require('./userLabels');
 const { logger } = require('./logger');
 const { incrementCounter } = require('./metrics');
+const { isTeamBased, getTeamColor } = require('./raidTypes');
 
 // Channel configuration for different signup types
 const CHANNEL_CONFIG = {
@@ -22,13 +23,18 @@ const CHANNEL_CONFIG = {
         map: keyChannels,
         names: ['key-signups', 'key signups', 'key-boss'],
         fallback: 'raid'
+    },
+    challenge: {
+        map: challengeChannels,
+        names: ['challenge-signups', 'challenge signups'],
+        fallback: 'raid'
     }
 };
 
 /**
- * Get the signup channel for a specific type (raid/museum/key)
+ * Get the signup channel for a specific type (raid/museum/key/challenge)
  * @param {Guild} guild - Discord guild
- * @param {string} type - Channel type ('raid', 'museum', or 'key')
+ * @param {string} type - Channel type ('raid', 'museum', 'key', or 'challenge')
  * @returns {Promise<Channel|null>} The signup channel or null
  */
 async function getSignupChannel(guild, type) {
@@ -76,6 +82,10 @@ async function getKeySignupChannel(guild) {
     return getSignupChannel(guild, 'key');
 }
 
+async function getChallengeSignupChannel(guild) {
+    return getSignupChannel(guild, 'challenge');
+}
+
 async function fetchChannelById(guild, channelId) {
     try {
         return await guild.channels.fetch(channelId);
@@ -92,9 +102,10 @@ async function getChannelForRaid(guild, raidData) {
         }
     }
 
-    return raidData.type === 'museum'
-        ? getMuseumSignupChannel(guild)
-        : getRaidSignupChannel(guild);
+    if (raidData.type === 'museum') return getMuseumSignupChannel(guild);
+    if (raidData.type === 'key') return getKeySignupChannel(guild);
+    if (raidData.type === 'challenge') return getChallengeSignupChannel(guild);
+    return getRaidSignupChannel(guild);
 }
 
 async function fetchRaidMessage(guild, raidData, messageId) {
@@ -277,7 +288,7 @@ async function updateMuseumEmbed(message, raidData) {
     await message.edit({ embeds: [embed] });
 }
 
-async function updateKeyEmbed(message, raidData) {
+async function updateTeamEmbed(message, raidData) {
     const embed = EmbedBuilder.from(message.embeds[0]);
     const existingFields = embed.data.fields || [];
     const guildSettings = raidData.guildId ? getGuildSettings(raidData.guildId) : null;
@@ -298,6 +309,9 @@ async function updateKeyEmbed(message, raidData) {
     };
 
     const newFields = [dateField];
+
+    // Update color for challenge mode if needed
+    embed.setColor(getTeamColor(raidData));
 
     // Build per-team fields
     for (let i = 0; i < raidData.teams.length; i++) {
@@ -343,7 +357,7 @@ function isRaidFull(raidData) {
         return raidData.signups.length >= maxSlots;
     }
 
-    if (raidData.type === 'key') {
+    if (isTeamBased(raidData)) {
         const maxPerTeam = raidData.maxPerTeam || 4;
         return raidData.teams.every((team) => team.users.length >= maxPerTeam);
     }
@@ -440,7 +454,7 @@ async function closeRaidSignup(message, raidData, options = {}) {
             const addedRaidData = { ...raidData };
             if (raidData.type === 'museum') {
                 addedRaidData.signups = added.map(p => p.userId);
-            } else if (raidData.type === 'key') {
+            } else if (isTeamBased(raidData)) {
                 // Reconstruct teams with only added users
                 if (raidData.teams) {
                     addedRaidData.teams = raidData.teams.map((team, idx) => ({
@@ -550,7 +564,7 @@ async function restoreSignupReactions(message, raidData) {
 
     if (raidData.type === 'museum') {
         emojis.add('✅');
-    } else if (raidData.type === 'key' && raidData.teams) {
+    } else if (isTeamBased(raidData) && raidData.teams) {
         const teamEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
         for (let i = 0; i < raidData.teams.length; i++) {
             emojis.add(teamEmojis[i]);
@@ -648,16 +662,19 @@ module.exports = {
     getRaidSignupChannel,
     getMuseumSignupChannel,
     getKeySignupChannel,
+    getChallengeSignupChannel,
     getChannelForRaid,
     fetchRaidMessage,
     parseDateTimeToTimestamp,
     updateRaidEmbed,
     updateMuseumEmbed,
-    updateKeyEmbed,
+    updateTeamEmbed,
+    updateKeyEmbed: updateTeamEmbed, // backwards compat
     findRaidByIdInGuild,
     closeRaidSignup,
     reopenRaidSignup,
     isRaidFull,
-    getRaidHistory
+    getRaidHistory,
+    isTeamBased // Re-export for convenience
 };
 

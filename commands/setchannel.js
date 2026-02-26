@@ -3,16 +3,18 @@ const {
     raidChannels,
     museumChannels,
     keyChannels,
+    challengeChannels,
     saveRaidChannels,
     saveMuseumChannels,
-    saveKeyChannels
+    saveKeyChannels,
+    setChallengeChannel
 } = require('../state');
 const { setAuditChannel, getAuditChannel, setDebugChannel, getDebugChannel } = require('../auditLog');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setchannel')
-        .setDescription('Configure posting channels for raid, museum, or key signups (interactive)')
+        .setDescription('Configure posting channels for raid, museum, key, or challenge signups (interactive)')
         .addChannelOption((option) =>
             option.setName('raid_channel')
                 .setDescription('Optional: set raid channel directly')
@@ -26,6 +28,11 @@ module.exports = {
         .addChannelOption((option) =>
             option.setName('key_channel')
                 .setDescription('Optional: set key boss channel directly')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(false))
+        .addChannelOption((option) =>
+            option.setName('challenge_channel')
+                .setDescription('Optional: set challenge mode channel directly')
                 .addChannelTypes(ChannelType.GuildText)
                 .setRequired(false))
         .addChannelOption((option) =>
@@ -43,6 +50,7 @@ module.exports = {
         const directRaid = interaction.options.getChannel('raid_channel');
         const directMuseum = interaction.options.getChannel('museum_channel');
         const directKey = interaction.options.getChannel('key_channel');
+        const directChallenge = interaction.options.getChannel('challenge_channel');
         const directAudit = interaction.options.getChannel('audit_channel');
         const directDebug = interaction.options.getChannel('debug_channel');
 
@@ -58,6 +66,9 @@ module.exports = {
             keyChannels.set(interaction.guildId, directKey.id);
             saveKeyChannels();
         }
+        if (directChallenge) {
+            setChallengeChannel(interaction.guildId, directChallenge.id);
+        }
         if (directAudit) {
             setAuditChannel(interaction.guildId, directAudit.id);
         }
@@ -65,9 +76,9 @@ module.exports = {
             setDebugChannel(interaction.guildId, directDebug.id);
         }
 
-        if (directRaid || directMuseum || directKey || directAudit || directDebug) {
+        if (directRaid || directMuseum || directKey || directChallenge || directAudit || directDebug) {
             return interaction.reply({
-                content: `Channels updated.\nRaid: ${formatChannel(raidChannels.get(interaction.guildId), interaction.guild)}\nMuseum: ${formatChannel(museumChannels.get(interaction.guildId), interaction.guild)}\nKey: ${formatChannel(keyChannels.get(interaction.guildId), interaction.guild)}\nAudit: ${formatChannel(getAuditChannel(interaction.guildId), interaction.guild)}\nDebug: ${formatChannel(getDebugChannel(interaction.guildId), interaction.guild)}`,
+                content: `Channels updated.\nRaid: ${formatChannel(raidChannels.get(interaction.guildId), interaction.guild)}\nMuseum: ${formatChannel(museumChannels.get(interaction.guildId), interaction.guild)}\nKey: ${formatChannel(keyChannels.get(interaction.guildId), interaction.guild)}\nChallenge: ${formatChannel(challengeChannels.get(interaction.guildId), interaction.guild)}\nAudit: ${formatChannel(getAuditChannel(interaction.guildId), interaction.guild)}\nDebug: ${formatChannel(getDebugChannel(interaction.guildId), interaction.guild)}`,
                 flags: MessageFlags.Ephemeral
             });
         }
@@ -112,6 +123,13 @@ module.exports = {
                 const refreshed = buildEmbed(interaction.guildId, interaction.guild);
                 return i.update({ embeds: [refreshed] });
             }
+            if (i.customId === 'setchannel:set:challenge') {
+                const channel = i.channels.first();
+                if (!channel) return i.reply({ content: 'Select a channel.', flags: MessageFlags.Ephemeral });
+                setChallengeChannel(interaction.guildId, channel.id);
+                const refreshed = buildEmbed(interaction.guildId, interaction.guild);
+                return i.update({ embeds: [refreshed] });
+            }
             if (i.customId === 'setchannel:set:audit') {
                 const channel = i.channels.first();
                 if (!channel) return i.reply({ content: 'Select a channel.', flags: MessageFlags.Ephemeral });
@@ -153,15 +171,17 @@ function buildEmbed(guildId, guild) {
     const raidId = raidChannels.get(guildId);
     const museumId = museumChannels.get(guildId);
     const keyId = keyChannels.get(guildId);
+    const challengeId = challengeChannels.get(guildId);
     const auditId = getAuditChannel(guildId);
     const debugId = getDebugChannel(guildId);
     return new EmbedBuilder()
         .setTitle('Channel Setup')
-        .setDescription('Select channels for raid, museum, key boss signups, and logging.')
+        .setDescription('Select channels for signups. Use `/setchannel debug_channel:#channel` to configure debug logging.')
         .addFields(
             { name: 'Raid channel', value: formatChannel(raidId, guild), inline: false },
             { name: 'Museum channel', value: formatChannel(museumId, guild), inline: false },
             { name: 'Key boss channel', value: formatChannel(keyId, guild), inline: false },
+            { name: 'Challenge mode channel', value: formatChannel(challengeId, guild), inline: false },
             { name: 'Audit log channel', value: formatChannel(auditId, guild), inline: false },
             { name: 'Debug log channel', value: formatChannel(debugId, guild), inline: false }
         );
@@ -186,19 +206,19 @@ function buildComponents() {
             .setPlaceholder('Select key boss channel')
             .addChannelTypes(ChannelType.GuildText)
     );
+    const challengeRow = new ActionRowBuilder().addComponents(
+        new ChannelSelectMenuBuilder()
+            .setCustomId('setchannel:set:challenge')
+            .setPlaceholder('Select challenge mode channel')
+            .addChannelTypes(ChannelType.GuildText)
+    );
     const auditRow = new ActionRowBuilder().addComponents(
         new ChannelSelectMenuBuilder()
             .setCustomId('setchannel:set:audit')
             .setPlaceholder('Select audit log channel')
             .addChannelTypes(ChannelType.GuildText)
     );
-    const debugRow = new ActionRowBuilder().addComponents(
-        new ChannelSelectMenuBuilder()
-            .setCustomId('setchannel:set:debug')
-            .setPlaceholder('Select debug log channel')
-            .addChannelTypes(ChannelType.GuildText)
-    );
-    return [raidRow, museumRow, keyRow, auditRow, debugRow];
+    return [raidRow, museumRow, keyRow, challengeRow, auditRow];
 }
 
 function formatChannel(channelId, guild) {

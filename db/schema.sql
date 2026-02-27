@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS guilds (
   participant_reminders_enabled INTEGER DEFAULT 1,
   raid_leader_role_id TEXT,
   threads_enabled INTEGER DEFAULT 0,
-  thread_auto_archive_minutes INTEGER DEFAULT 1440
+  thread_auto_archive_minutes INTEGER DEFAULT 1440,
+  default_timezone TEXT DEFAULT 'America/New_York'
 );
 
 -- Active raids (most critical table)

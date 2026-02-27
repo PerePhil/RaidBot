@@ -7,6 +7,7 @@ const { buildLabelsForRaid } = require('./userLabels');
 const { logger } = require('./logger');
 const { incrementCounter } = require('./metrics');
 const { isTeamBased, getTeamColor } = require('./raidTypes');
+const { getTimezoneOffsetMinutes } = require('./timezoneHelper');
 
 // Channel configuration for different signup types
 const CHANNEL_CONFIG = {
@@ -121,7 +122,7 @@ async function fetchRaidMessage(guild, raidData, messageId) {
     }
 }
 
-function parseDateTimeToTimestamp(datetimeStr, referenceDate = new Date()) {
+function parseDateTimeToTimestamp(datetimeStr, referenceDate = new Date(), timezone = null) {
     try {
         if (!datetimeStr) return null;
 
@@ -131,7 +132,13 @@ function parseDateTimeToTimestamp(datetimeStr, referenceDate = new Date()) {
             return parseInt(trimmed, 10);
         }
 
-        const parsedDate = chrono.parseDate(trimmed, referenceDate, { forwardDate: true });
+        let ref = referenceDate;
+        if (timezone) {
+            const offsetMinutes = getTimezoneOffsetMinutes(timezone, referenceDate);
+            ref = { instant: referenceDate, timezone: offsetMinutes };
+        }
+
+        const parsedDate = chrono.parseDate(trimmed, ref, { forwardDate: true });
         if (parsedDate) {
             return Math.floor(parsedDate.getTime() / 1000);
         }

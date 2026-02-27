@@ -320,7 +320,8 @@ async function showTimeModal(interaction, raidData, messageId) {
     }
 
     const newDatetime = submission.fields.getTextInputValue('new_datetime');
-    const timestamp = parseDateTimeToTimestamp(newDatetime);
+    const guildTz = getGuildSettings(submission.guildId).defaultTimezone;
+    const timestamp = parseDateTimeToTimestamp(newDatetime, new Date(), guildTz);
     if (!timestamp && !newDatetime.match(/^\d{4}-\d{2}-\d{2}/)) {
         return submission.reply({
             content: 'Could not parse that time. Try natural language like "tomorrow 7pm" or a Unix timestamp.',
@@ -824,7 +825,8 @@ async function showDuplicateFlow(interaction, raidData, messageId) {
     if (!submission) return;
 
     const newDatetime = submission.fields.getTextInputValue('new_datetime');
-    const timestamp = parseDateTimeToTimestamp(newDatetime);
+    const guildTz = getGuildSettings(submission.guildId).defaultTimezone;
+    const timestamp = parseDateTimeToTimestamp(newDatetime, new Date(), guildTz);
     if (!timestamp && !newDatetime.match(/^\d{4}-\d{2}-\d{2}/)) {
         return submission.reply({
             content: 'Could not parse that time. Try natural language like "next friday 7pm" or a Unix timestamp.',

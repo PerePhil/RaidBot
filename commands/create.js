@@ -163,7 +163,8 @@ module.exports = {
                 if (!submission) return;
 
                 const datetime = submission.fields.getTextInputValue('datetime');
-                const timestamp = parseDateTimeToTimestamp(datetime);
+                const guildTz = getGuildSettings(interaction.guildId).defaultTimezone;
+                const timestamp = parseDateTimeToTimestamp(datetime, new Date(), guildTz);
                 if (!timestamp && !datetime.match(/^\d{4}-\d{2}-\d{2}/)) {
                     return submission.reply({
                         content: 'Could not parse that time. Try natural language like "tomorrow 7pm" or a Unix timestamp.',
@@ -364,7 +365,8 @@ async function handleCreate(interaction, state) {
         return false;
     }
 
-    const timestamp = state.timestamp ?? parseDateTimeToTimestamp(state.datetime);
+    const guildTz = getGuildSettings(interaction.guildId).defaultTimezone;
+    const timestamp = state.timestamp ?? parseDateTimeToTimestamp(state.datetime, new Date(), guildTz);
     if (!timestamp && !state.datetime.match(/^\d{4}-\d{2}-\d{2}/)) {
         await interaction.followUp({
             content: 'Could not parse that time. Try natural language like "tomorrow 7pm" or a Unix timestamp.',

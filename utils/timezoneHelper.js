@@ -14,6 +14,7 @@ function getTimezoneOffsetMinutes(timezone, date = new Date()) {
  * Validate that a string is a valid IANA timezone.
  */
 function isValidTimezone(timezone) {
+    if (!timezone || typeof timezone !== 'string') return false;
     try {
         Intl.DateTimeFormat(undefined, { timeZone: timezone });
         return true;

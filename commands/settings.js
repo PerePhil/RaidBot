@@ -216,7 +216,7 @@ function buildComponents(settings) {
             .setStyle(settings.threadsEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder()
             .setCustomId('settings:modal:timezone')
-            .setLabel(`TZ: ${(settings.defaultTimezone || 'America/New_York').replace('America/', '')}`)
+            .setLabel(`TZ: ${(settings.defaultTimezone || 'America/New_York').split('/').pop().replace(/_/g, ' ')}`)
             .setStyle(ButtonStyle.Primary)
     );
 
@@ -253,7 +253,7 @@ function buildComponents(settings) {
     const leaderMenu = new RoleSelectMenuBuilder()
         .setCustomId('settings:set:raidLeaderRoleId')
         .setPlaceholder(settings.raidLeaderRoleId ? 'Change raid leader role' : 'Pick raid leader role')
-        .setMinValues(1)
+        .setMinValues(0)
         .setMaxValues(1);
 
     if (settings.raidLeaderRoleId) {

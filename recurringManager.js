@@ -357,7 +357,8 @@ function getDateInTimezone(date, timezone) {
  */
 function convertTimezoneToLocal(date, timezone) {
     try {
-        // Create a date string in the target timezone
+        // date has wall-clock values for the target timezone stored via getDateInTimezone
+        // We need to find the UTC timestamp that corresponds to those wall-clock values
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
@@ -365,38 +366,21 @@ function convertTimezoneToLocal(date, timezone) {
         const minutes = String(date.getMinutes()).padStart(2, '0');
         const seconds = String(date.getSeconds()).padStart(2, '0');
 
-        // ISO string without timezone
-        const dateStr = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+        // Treat wall-clock values as UTC to get a reference point
+        const asUtc = new Date(`${year}-${month}-${day}T${hours}:${minutes}:${seconds}Z`);
 
-        // Parse as if it's in the target timezone and get UTC
-        const formatter = new Intl.DateTimeFormat('en-US', {
-            timeZone: timezone,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        });
+        // Find offset: how does this UTC instant display in the target timezone?
+        const tzStr = asUtc.toLocaleString('en-US', { timeZone: timezone });
+        const utcStr = asUtc.toLocaleString('en-US', { timeZone: 'UTC' });
+        const tzDate = new Date(tzStr);
+        const utcDate = new Date(utcStr);
 
-        // Create a reference date to find the offset
-        const referenceUtc = new Date(dateStr + 'Z'); // Assume UTC
-        const parts = formatter.formatToParts(referenceUtc);
-        const get = (type) => parts.find(p => p.type === type)?.value;
+        // offsetMs = (tz display as local) - (utc display as local)
+        // For EST: negative (EST is behind UTC)
+        const offsetMs = tzDate - utcDate;
 
-        const tzDate = new Date(
-            get('year'),
-            parseInt(get('month')) - 1,
-            get('day'),
-            get('hour'),
-            get('minute'),
-            get('second')
-        );
-
-        // Calculate offset and adjust
-        const offset = referenceUtc.getTime() - tzDate.getTime();
-        return new Date(Date.parse(dateStr) - offset);
+        // Adjust: subtract the offset to convert from timezone wall-clock to UTC
+        return new Date(asUtc.getTime() - offsetMs);
     } catch (error) {
         logger.error(`Timezone conversion error for ${timezone}, using date as-is:`, { error: error.message });
         return date;

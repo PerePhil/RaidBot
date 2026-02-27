@@ -60,7 +60,42 @@ module.exports = {
             if (!i.isButton() && !i.isStringSelectMenu() && !i.isRoleSelectMenu()) return;
             let updatedSettings = { ...settings };
 
-            if (i.customId.startsWith('settings:toggle:')) {
+            if (i.customId === 'settings:modal:timezone') {
+                const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+                const modal = new ModalBuilder()
+                    .setCustomId('settings:timezone:modal')
+                    .setTitle('Set Default Timezone')
+                    .addComponents(
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId('timezone')
+                                .setLabel('IANA Timezone (e.g., America/New_York)')
+                                .setPlaceholder('America/New_York')
+                                .setValue(settings.defaultTimezone || 'America/New_York')
+                                .setStyle(TextInputStyle.Short)
+                                .setRequired(true)
+                        )
+                    );
+                await i.showModal(modal);
+                const modalSubmit = await i.awaitModalSubmit({
+                    filter: (sub) => sub.customId === 'settings:timezone:modal' && sub.user.id === interaction.user.id,
+                    time: 60000
+                }).catch(() => null);
+                if (!modalSubmit) return;
+
+                const tz = modalSubmit.fields.getTextInputValue('timezone').trim();
+                const { isValidTimezone } = require('../utils/timezoneHelper');
+                if (!isValidTimezone(tz)) {
+                    return modalSubmit.reply({ content: `Invalid timezone "${tz}". Use IANA format like America/New_York, America/Chicago, etc.`, flags: MessageFlags.Ephemeral });
+                }
+                updatedSettings.defaultTimezone = tz;
+                updateGuildSettings(interaction.guildId, updatedSettings);
+                Object.assign(settings, updatedSettings);
+                const refreshedEmbed = buildSettingsEmbed(interaction.guild, settings);
+                const refreshedComponents = buildComponents(settings);
+                await modalSubmit.update({ embeds: [refreshedEmbed], components: refreshedComponents });
+                return;
+            } else if (i.customId.startsWith('settings:toggle:')) {
                 const key = i.customId.split(':')[2];
                 if (key === 'autoCloseSeconds') {
                     const last = settings.lastAutoCloseSeconds > 0 ? settings.lastAutoCloseSeconds : 60 * 60;
@@ -73,8 +108,6 @@ module.exports = {
                 } else {
                     updatedSettings[key] = !settings[key];
                 }
-            } else if (i.customId === 'settings:clear:raidLeaderRoleId') {
-                updatedSettings.raidLeaderRoleId = null;
             } else if (i.customId === 'settings:set:raidLeaderRoleId') {
                 updatedSettings.raidLeaderRoleId = i.values?.[0] || null;
             } else if (i.customId.startsWith('settings:set:')) {
@@ -154,6 +187,11 @@ function buildSettingsEmbed(guild, settings) {
                 name: 'Raid leader role',
                 value: leaderRoleLabel,
                 inline: true
+            },
+            {
+                name: 'Default timezone',
+                value: settings.defaultTimezone || 'America/New_York',
+                inline: true
             }
         );
 }
@@ -177,10 +215,9 @@ function buildComponents(settings) {
             .setLabel(`Threads: ${settings.threadsEnabled ? 'On' : 'Off'}`)
             .setStyle(settings.threadsEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId('settings:clear:raidLeaderRoleId')
-            .setLabel('Clear leader')
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(!settings.raidLeaderRoleId)
+            .setCustomId('settings:modal:timezone')
+            .setLabel(`TZ: ${(settings.defaultTimezone || 'America/New_York').replace('America/', '')}`)
+            .setStyle(ButtonStyle.Primary)
     );
 
     const creatorSelect = new ActionRowBuilder().addComponents(

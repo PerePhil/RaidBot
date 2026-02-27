@@ -10,6 +10,8 @@ const {
     usersAvailableAt
 } = require('../availabilityManager');
 const { sendAuditLog } = require('../auditLog');
+const { parseDateTimeToTimestamp } = require('../utils/raidHelpers');
+const { getGuildSettings } = require('../state');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -371,7 +373,6 @@ async function handleOptimal(interaction) {
 
 async function handleCheck(interaction) {
     const timeInput = interaction.options.getString('time');
-    const chrono = require('chrono-node');
 
     // Parse the time input
     let timestamp;
@@ -382,15 +383,14 @@ async function handleCheck(interaction) {
             ? Math.floor(parseInt(timeInput) / 1000)
             : parseInt(timeInput);
     } else {
-        // Use chrono to parse natural language
-        const parsed = chrono.parseDate(timeInput, new Date(), { forwardDate: true });
-        if (!parsed) {
+        const guildTz = getGuildSettings(interaction.guildId).defaultTimezone;
+        timestamp = parseDateTimeToTimestamp(timeInput, new Date(), guildTz);
+        if (!timestamp) {
             return interaction.reply({
                 content: `Could not parse "${timeInput}" as a time. Try formats like "Saturday 7pm", "tomorrow 8pm", or a Unix timestamp.`,
                 flags: MessageFlags.Ephemeral
             });
         }
-        timestamp = Math.floor(parsed.getTime() / 1000);
     }
 
     // Get users available at this time
